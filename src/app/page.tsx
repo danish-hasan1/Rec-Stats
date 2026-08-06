@@ -39,6 +39,7 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  UserCheck,
 } from "lucide-react";
 
 function DeltaBadge({ current, previous }: { current: number; previous: number }) {
@@ -74,7 +75,7 @@ function DeltaBadge({ current, previous }: { current: number; previous: number }
 }
 
 type Detail =
-  | { kind: "entries"; title: string; rows: EntryView[] }
+  | { kind: "entries"; metric: "submissions" | "interviews"; title: string; rows: EntryView[] }
   | { kind: "roles"; title: string; rows: Role[] }
   | { kind: "submitters"; title: string; rows: Submitter[] }
   | null;
@@ -156,7 +157,14 @@ export default function DashboardPage() {
   const funnelMax = monthTotals.totalSubs;
 
   const showEntries = (title: string, rows: EntryView[]) =>
-    setDetail({ kind: "entries", title, rows });
+    setDetail({ kind: "entries", metric: "submissions", title, rows });
+  const showInterviews = (title: string, rows: EntryView[]) =>
+    setDetail({
+      kind: "entries",
+      metric: "interviews",
+      title,
+      rows: rows.filter((e) => e.interview_l1 + e.interview_l2 + e.interview_l3 > 0),
+    });
   const showRoles = (title: string, rows: Role[]) => setDetail({ kind: "roles", title, rows });
   const showSubmitters = (title: string, rows: Submitter[]) =>
     setDetail({ kind: "submitters", title, rows });
@@ -210,6 +218,53 @@ export default function DashboardPage() {
           accent="chart-4"
           onClick={() =>
             showEntries(
+              "This Month",
+              entries.filter((e) => e.date >= monthStartISO && e.date <= todayISO)
+            )
+          }
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <KpiCard
+          label="Today — Interviews"
+          value={loading ? "…" : todayTotals.interviews}
+          sub={`${todayTotals.totalSubs} submissions`}
+          icon={UserCheck}
+          accent="primary"
+          onClick={() => showInterviews(`Today — ${todayISO}`, entries.filter((e) => e.date === todayISO))}
+        />
+        <KpiCard
+          label="Yesterday — Interviews"
+          value={loading ? "…" : yesterdayTotals.interviews}
+          sub={`${yesterdayTotals.totalSubs} submissions`}
+          icon={UserCheck}
+          accent="chart-2"
+          onClick={() =>
+            showInterviews(`Yesterday — ${yesterdayISO}`, entries.filter((e) => e.date === yesterdayISO))
+          }
+        />
+        <KpiCard
+          label="This Week — Interviews"
+          value={loading ? "…" : weekTotals.interviews}
+          sub={`${weekTotals.totalSubs} submissions`}
+          icon={UserCheck}
+          accent="chart-3"
+          onClick={() =>
+            showInterviews(
+              "This Week",
+              entries.filter((e) => e.date >= weekStartISO && e.date <= todayISO)
+            )
+          }
+        />
+        <KpiCard
+          label="This Month — Interviews"
+          value={loading ? "…" : monthTotals.interviews}
+          sub={`${monthTotals.totalSubs} submissions`}
+          icon={UserCheck}
+          accent="chart-4"
+          onClick={() =>
+            showInterviews(
               "This Month",
               entries.filter((e) => e.date >= monthStartISO && e.date <= todayISO)
             )
@@ -440,10 +495,15 @@ export default function DashboardPage() {
                   <TableHead>Source</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead className="text-right">Subs</TableHead>
-                  <TableHead className="text-right">L1</TableHead>
-                  <TableHead className="text-right">L2</TableHead>
-                  <TableHead className="text-right">L3</TableHead>
+                  {detail.metric === "submissions" ? (
+                    <TableHead className="text-right">Subs</TableHead>
+                  ) : (
+                    <>
+                      <TableHead className="text-right">L1</TableHead>
+                      <TableHead className="text-right">L2</TableHead>
+                      <TableHead className="text-right">L3</TableHead>
+                    </>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -457,10 +517,15 @@ export default function DashboardPage() {
                     </TableCell>
                     <TableCell>{e.submitter_name}</TableCell>
                     <TableCell>{e.role_name}</TableCell>
-                    <TableCell className="text-right">{e.submissions}</TableCell>
-                    <TableCell className="text-right">{e.interview_l1 || "—"}</TableCell>
-                    <TableCell className="text-right">{e.interview_l2 || "—"}</TableCell>
-                    <TableCell className="text-right">{e.interview_l3 || "—"}</TableCell>
+                    {detail.metric === "submissions" ? (
+                      <TableCell className="text-right">{e.submissions}</TableCell>
+                    ) : (
+                      <>
+                        <TableCell className="text-right">{e.interview_l1 || "—"}</TableCell>
+                        <TableCell className="text-right">{e.interview_l2 || "—"}</TableCell>
+                        <TableCell className="text-right">{e.interview_l3 || "—"}</TableCell>
+                      </>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
