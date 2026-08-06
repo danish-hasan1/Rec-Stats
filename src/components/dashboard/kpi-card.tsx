@@ -10,6 +10,7 @@ export function KpiCard({
   extra,
   icon: Icon,
   accent,
+  onClick,
 }: {
   label: string;
   value: number | string;
@@ -17,9 +18,28 @@ export function KpiCard({
   extra?: ReactNode;
   icon: LucideIcon;
   accent?: "primary" | "chart-2" | "chart-3" | "chart-4";
+  onClick?: () => void;
 }) {
   return (
-    <Card className="glass overflow-hidden">
+    <Card
+      className={cn(
+        "glass overflow-hidden",
+        onClick && "cursor-pointer transition-transform hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
+      )}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+    >
       <CardContent className="flex items-center justify-between gap-3 py-2">
         <div>
           <p className="text-sm text-muted-foreground">{label}</p>

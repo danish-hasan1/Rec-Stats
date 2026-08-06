@@ -5,6 +5,13 @@ import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -66,11 +73,18 @@ function DeltaBadge({ current, previous }: { current: number; previous: number }
   );
 }
 
+type Detail =
+  | { kind: "entries"; title: string; rows: EntryView[] }
+  | { kind: "roles"; title: string; rows: Role[] }
+  | { kind: "submitters"; title: string; rows: Submitter[] }
+  | null;
+
 export default function DashboardPage() {
   const [entries, setEntries] = useState<EntryView[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [submitters, setSubmitters] = useState<Submitter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState<Detail>(null);
 
   useEffect(() => {
     Promise.all([fetchEntries("2000-01-01", "2100-01-01"), fetchRoles(), fetchSubmitters()])
@@ -141,6 +155,12 @@ export default function DashboardPage() {
 
   const funnelMax = monthTotals.totalSubs;
 
+  const showEntries = (title: string, rows: EntryView[]) =>
+    setDetail({ kind: "entries", title, rows });
+  const showRoles = (title: string, rows: Role[]) => setDetail({ kind: "roles", title, rows });
+  const showSubmitters = (title: string, rows: Submitter[]) =>
+    setDetail({ kind: "submitters", title, rows });
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -151,8 +171,22 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiCard label="Today — Submissions" value={loading ? "…" : todayTotals.totalSubs} sub={`${todayTotals.interviews} interviews`} icon={Send} accent="primary" />
-        <KpiCard label="Yesterday — Submissions" value={loading ? "…" : yesterdayTotals.totalSubs} sub={`${yesterdayTotals.interviews} interviews`} icon={CalendarCheck2} accent="chart-2" />
+        <KpiCard
+          label="Today — Submissions"
+          value={loading ? "…" : todayTotals.totalSubs}
+          sub={`${todayTotals.interviews} interviews`}
+          icon={Send}
+          accent="primary"
+          onClick={() => showEntries(`Today — ${todayISO}`, entries.filter((e) => e.date === todayISO))}
+        />
+        <KpiCard
+          label="Yesterday — Submissions"
+          value={loading ? "…" : yesterdayTotals.totalSubs}
+          sub={`${yesterdayTotals.interviews} interviews`}
+          icon={CalendarCheck2}
+          accent="chart-2"
+          onClick={() => showEntries(`Yesterday — ${yesterdayISO}`, entries.filter((e) => e.date === yesterdayISO))}
+        />
         <KpiCard
           label="This Week — Submissions"
           value={loading ? "…" : weekTotals.totalSubs}
@@ -160,6 +194,12 @@ export default function DashboardPage() {
           extra={!loading && <DeltaBadge current={weekTotals.totalSubs} previous={prevWeekTotals.totalSubs} />}
           icon={Users2}
           accent="chart-3"
+          onClick={() =>
+            showEntries(
+              "This Week",
+              entries.filter((e) => e.date >= weekStartISO && e.date <= todayISO)
+            )
+          }
         />
         <KpiCard
           label="This Month — Submissions"
@@ -168,19 +208,60 @@ export default function DashboardPage() {
           extra={!loading && <DeltaBadge current={monthTotals.totalSubs} previous={prevMonthTotals.totalSubs} />}
           icon={Building2}
           accent="chart-4"
+          onClick={() =>
+            showEntries(
+              "This Month",
+              entries.filter((e) => e.date >= monthStartISO && e.date <= todayISO)
+            )
+          }
         />
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <KpiCard label="Open Roles" value={loading ? "…" : roleCounts.open} sub={`${roleCounts.on_hold} on hold`} icon={Briefcase} accent="primary" />
-        <KpiCard label="Deals Closed" value={loading ? "…" : roleCounts.deal} sub={`${roleCounts.lost + roleCounts.cancelled} lost/cancelled`} icon={Handshake} accent="chart-2" />
-        <KpiCard label="Active Team" value={loading ? "…" : activeRecruiters + activeVendors} sub={`${activeRecruiters} recruiters, ${activeVendors} vendors`} icon={Users2} accent="chart-3" />
+        <KpiCard
+          label="Open Roles"
+          value={loading ? "…" : roleCounts.open}
+          sub={`${roleCounts.on_hold} on hold`}
+          icon={Briefcase}
+          accent="primary"
+          onClick={() => showRoles("Open Roles", roles.filter((r) => r.status === "open"))}
+        />
+        <KpiCard
+          label="Deals Closed"
+          value={loading ? "…" : roleCounts.deal}
+          sub={`${roleCounts.lost + roleCounts.cancelled} lost/cancelled`}
+          icon={Handshake}
+          accent="chart-2"
+          onClick={() => showRoles("Deals Closed", roles.filter((r) => r.status === "deal"))}
+        />
+        <KpiCard
+          label="Active Team"
+          value={loading ? "…" : activeRecruiters + activeVendors}
+          sub={`${activeRecruiters} recruiters, ${activeVendors} vendors`}
+          icon={Users2}
+          accent="chart-3"
+          onClick={() => showSubmitters("Active Team", submitters.filter((s) => s.status === "active"))}
+        />
         <KpiCard
           label="Top Recruiter — this month"
           value={loading ? "…" : topRecruiter ? topRecruiter.name : "—"}
           sub={topRecruiter ? `${topRecruiter.recruiterSubs} self subs` : "No data yet"}
           icon={Trophy}
           accent="chart-4"
+          onClick={
+            topRecruiter
+              ? () =>
+                  showEntries(
+                    `${topRecruiter.name} — this month`,
+                    entries.filter(
+                      (e) =>
+                        e.submitter_name === topRecruiter.name &&
+                        e.submitter_type === "recruiter" &&
+                        e.date >= monthStartISO
+                    )
+                  )
+              : undefined
+          }
         />
         <KpiCard
           label="Top Vendor — this month"
@@ -188,6 +269,20 @@ export default function DashboardPage() {
           sub={topVendor ? `${topVendor.vendorSubs} subs` : "No data yet"}
           icon={Building2}
           accent="chart-2"
+          onClick={
+            topVendor
+              ? () =>
+                  showEntries(
+                    `${topVendor.name} — this month`,
+                    entries.filter(
+                      (e) =>
+                        e.submitter_name === topVendor.name &&
+                        e.submitter_type === "vendor" &&
+                        e.date >= monthStartISO
+                    )
+                  )
+              : undefined
+          }
         />
       </div>
 
@@ -323,6 +418,102 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={detail !== null} onOpenChange={(open) => !open && setDetail(null)}>
+        <DialogContent className="glass-strong max-h-[80vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{detail?.title}</DialogTitle>
+            <DialogDescription>
+              {detail?.rows.length ?? 0} {detail?.rows.length === 1 ? "row" : "rows"}
+            </DialogDescription>
+          </DialogHeader>
+
+          {detail?.rows.length === 0 && (
+            <p className="text-sm text-muted-foreground">Nothing here.</p>
+          )}
+
+          {detail?.kind === "entries" && detail.rows.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead className="text-right">Subs</TableHead>
+                  <TableHead className="text-right">L1</TableHead>
+                  <TableHead className="text-right">L2</TableHead>
+                  <TableHead className="text-right">L3</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {detail.rows.map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="whitespace-nowrap">{e.date}</TableCell>
+                    <TableCell>
+                      <Badge variant={e.submitter_type === "recruiter" ? "default" : "secondary"}>
+                        {e.submitter_type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{e.submitter_name}</TableCell>
+                    <TableCell>{e.role_name}</TableCell>
+                    <TableCell className="text-right">{e.submissions}</TableCell>
+                    <TableCell className="text-right">{e.interview_l1 || "—"}</TableCell>
+                    <TableCell className="text-right">{e.interview_l2 || "—"}</TableCell>
+                    <TableCell className="text-right">{e.interview_l3 || "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+
+          {detail?.kind === "roles" && detail.rows.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Client</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {detail.rows.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-medium">{r.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{r.client || "—"}</TableCell>
+                    <TableCell>
+                      <Badge variant={roleStatusVariant(r.status)}>{r.status.replace("_", " ")}</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+
+          {detail?.kind === "submitters" && detail.rows.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {detail.rows.map((s) => (
+                  <TableRow key={s.id}>
+                    <TableCell className="font-medium">{s.name}</TableCell>
+                    <TableCell>
+                      <Badge variant={s.type === "recruiter" ? "default" : "secondary"}>{s.type}</Badge>
+                    </TableCell>
+                    <TableCell className="capitalize text-muted-foreground">{s.status}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
