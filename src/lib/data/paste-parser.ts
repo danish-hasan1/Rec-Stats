@@ -155,5 +155,32 @@ export function parsePastedBlock(text: string): ParseResult {
     });
   }
 
-  return { date, rows, warnings };
+  const merged = mergeDuplicateRows(rows, warnings);
+
+  return { date, rows: merged, warnings };
+}
+
+// Entries are unique per (date, submitter, role) — a paste block that lists
+// the same submitter+role twice (e.g. one row per interview stage) would
+// otherwise send two rows hitting the same upsert conflict target in one
+// batch, which Postgres rejects outright. Fold them into a single row.
+function mergeDuplicateRows(rows: ParsedRow[], warnings: string[]): ParsedRow[] {
+  const byKey = new Map<string, ParsedRow>();
+  for (const row of rows) {
+    const key = `${row.source}:${row.submitterName.toLowerCase()}:${row.roleName.toLowerCase()}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, { ...row });
+      continue;
+    }
+    existing.submissions += row.submissions;
+    existing.interviewL1 = Math.max(existing.interviewL1, row.interviewL1);
+    existing.interviewL2 = Math.max(existing.interviewL2, row.interviewL2);
+    existing.interviewL3 = Math.max(existing.interviewL3, row.interviewL3);
+    existing.raw = `${existing.raw} + ${row.raw}`;
+    warnings.push(
+      `Duplicate rows for "${row.submitterName}" / "${row.roleName}" merged into one entry.`
+    );
+  }
+  return [...byKey.values()];
 }
