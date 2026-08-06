@@ -176,19 +176,30 @@ export default function EntryPage() {
       toast.error("Pick a submitter and role first.");
       return;
     }
+
+    const payload = {
+      date,
+      submitter_id: submitterId,
+      role_id: roleId,
+      submissions: parseInt(submissions || "0", 10) || 0,
+      interview_l1: parseInt(interviewL1 || "0", 10) || 0,
+      interview_l2: parseInt(interviewL2 || "0", 10) || 0,
+      interview_l3: parseInt(interviewL3 || "0", 10) || 0,
+      deal_recruiter_id: submitterType === "vendor" ? dealRecruiterId : null,
+    };
+
+    const isBlank =
+      payload.submissions === 0 &&
+      payload.interview_l1 === 0 &&
+      payload.interview_l2 === 0 &&
+      payload.interview_l3 === 0;
+    if (isBlank && !markDeal) {
+      toast.error("Nothing to save — enter submissions or an interview count.");
+      return;
+    }
+
     setSaving(true);
     try {
-      const payload = {
-        date,
-        submitter_id: submitterId,
-        role_id: roleId,
-        submissions: parseInt(submissions || "0", 10) || 0,
-        interview_l1: parseInt(interviewL1 || "0", 10) || 0,
-        interview_l2: parseInt(interviewL2 || "0", 10) || 0,
-        interview_l3: parseInt(interviewL3 || "0", 10) || 0,
-        deal_recruiter_id: submitterType === "vendor" ? dealRecruiterId : null,
-      };
-
       if (editingId) {
         await updateEntry(editingId, payload);
       } else {
