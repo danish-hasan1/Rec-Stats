@@ -16,7 +16,13 @@ export type Role = {
   name: string;
   client: string | null;
   status: RoleStatus;
+  closed_by_id: string | null;
   created_at: string;
+};
+
+export type RoleView = Role & {
+  closed_by_name: string | null;
+  closed_by_type: SubmitterType | null;
 };
 
 export type Entry = {

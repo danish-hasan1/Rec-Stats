@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { Entry, EntryView, Role, RoleStatus, Submitter, SubmitterType } from "@/types/db";
+import type { Entry, EntryView, Role, RoleStatus, RoleView, Submitter, SubmitterType } from "@/types/db";
 
 export async function fetchSubmitters(): Promise<Submitter[]> {
   const supabase = createClient();
@@ -11,9 +11,9 @@ export async function fetchSubmitters(): Promise<Submitter[]> {
   return data ?? [];
 }
 
-export async function fetchRoles(): Promise<Role[]> {
+export async function fetchRoles(): Promise<RoleView[]> {
   const supabase = createClient();
-  const { data, error } = await supabase.from("roles").select("*").order("name");
+  const { data, error } = await supabase.from("roles_view").select("*").order("name");
   if (error) throw error;
   return data ?? [];
 }
@@ -52,9 +52,12 @@ export async function setSubmitterStatus(id: string, status: "active" | "inactiv
   if (error) throw error;
 }
 
-export async function setRoleStatus(id: string, status: RoleStatus) {
+export async function setRoleStatus(id: string, status: RoleStatus, closedById: string | null = null) {
   const supabase = createClient();
-  const { error } = await supabase.from("roles").update({ status }).eq("id", id);
+  const { error } = await supabase
+    .from("roles")
+    .update({ status, closed_by_id: status === "deal" ? closedById : null })
+    .eq("id", id);
   if (error) throw error;
 }
 

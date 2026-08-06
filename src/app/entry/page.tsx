@@ -207,7 +207,10 @@ export default function EntryPage() {
       }
 
       if (markDeal) {
-        await setRoleStatus(roleId, "deal");
+        // Credit the deal to whoever actually gets credit for it: the vendor's
+        // deal recruiter when one's set, otherwise the submitter themselves.
+        const closedById = submitterType === "vendor" && dealRecruiterId ? dealRecruiterId : submitterId;
+        await setRoleStatus(roleId, "deal", closedById);
       }
 
       toast.success(

@@ -26,7 +26,7 @@ import { fetchEntries, fetchRoles, fetchSubmitters } from "@/lib/data/queries";
 import { byDate, byRole, bySubmitter, startOfMonth, startOfWeek, sumEntries, toISODate } from "@/lib/data/aggregate";
 import { roleStatusVariant } from "@/lib/data/role-status";
 import { cn } from "@/lib/utils";
-import type { EntryView, Role, Submitter } from "@/types/db";
+import type { EntryView, RoleView, Submitter } from "@/types/db";
 import {
   Send,
   Building2,
@@ -76,13 +76,13 @@ function DeltaBadge({ current, previous }: { current: number; previous: number }
 
 type Detail =
   | { kind: "entries"; metric: "submissions" | "interviews"; title: string; rows: EntryView[] }
-  | { kind: "roles"; title: string; rows: Role[] }
+  | { kind: "roles"; title: string; rows: RoleView[] }
   | { kind: "submitters"; title: string; rows: Submitter[] }
   | null;
 
 export default function DashboardPage() {
   const [entries, setEntries] = useState<EntryView[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [roles, setRoles] = useState<RoleView[]>([]);
   const [submitters, setSubmitters] = useState<Submitter[]>([]);
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<Detail>(null);
@@ -152,7 +152,7 @@ export default function DashboardPage() {
     .filter((r) => r.type === "vendor")
     .sort((a, b) => b.vendorSubs - a.vendorSubs)[0];
 
-  const roleStatusById = new Map(roles.map((r) => [r.id, r.status]));
+  const rolesById = new Map(roles.map((r) => [r.id, r]));
 
   const funnelMax = monthTotals.totalSubs;
 
@@ -165,7 +165,7 @@ export default function DashboardPage() {
       title,
       rows: rows.filter((e) => e.interview_l1 + e.interview_l2 + e.interview_l3 > 0),
     });
-  const showRoles = (title: string, rows: Role[]) => setDetail({ kind: "roles", title, rows });
+  const showRoles = (title: string, rows: RoleView[]) => setDetail({ kind: "roles", title, rows });
   const showSubmitters = (title: string, rows: Submitter[]) =>
     setDetail({ kind: "submitters", title, rows });
 
@@ -442,6 +442,7 @@ export default function DashboardPage() {
                   <TableRow>
                     <TableHead>Role</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Closed By</TableHead>
                     <TableHead className="text-right">Submissions</TableHead>
                     <TableHead className="text-right">L1</TableHead>
                     <TableHead className="text-right">L2</TableHead>
@@ -449,24 +450,30 @@ export default function DashboardPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {roleRows.map((r) => (
-                    <TableRow key={r.name}>
-                      <TableCell className="font-medium">{r.name}</TableCell>
-                      <TableCell>
-                        {roleStatusById.has(r.id) ? (
-                          <Badge variant={roleStatusVariant(roleStatusById.get(r.id)!)}>
-                            {roleStatusById.get(r.id)!.replace("_", " ")}
-                          </Badge>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">{r.totalSubs}</TableCell>
-                      <TableCell className="text-right">{r.interviewL1 || "—"}</TableCell>
-                      <TableCell className="text-right">{r.interviewL2 || "—"}</TableCell>
-                      <TableCell className="text-right">{r.interviewL3 || "—"}</TableCell>
-                    </TableRow>
-                  ))}
+                  {roleRows.map((r) => {
+                    const role = rolesById.get(r.id);
+                    return (
+                      <TableRow key={r.name}>
+                        <TableCell className="font-medium">{r.name}</TableCell>
+                        <TableCell>
+                          {role ? (
+                            <Badge variant={roleStatusVariant(role.status)}>
+                              {role.status.replace("_", " ")}
+                            </Badge>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {role?.status === "deal" && role.closed_by_name ? role.closed_by_name : "—"}
+                        </TableCell>
+                        <TableCell className="text-right">{r.totalSubs}</TableCell>
+                        <TableCell className="text-right">{r.interviewL1 || "—"}</TableCell>
+                        <TableCell className="text-right">{r.interviewL2 || "—"}</TableCell>
+                        <TableCell className="text-right">{r.interviewL3 || "—"}</TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}
@@ -475,7 +482,7 @@ export default function DashboardPage() {
       </div>
 
       <Dialog open={detail !== null} onOpenChange={(open) => !open && setDetail(null)}>
-        <DialogContent className="glass-strong max-h-[80vh] max-w-2xl overflow-y-auto">
+        <DialogContent className="glass-strong flex max-h-[92vh] w-[95vw] max-w-4xl flex-col overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>{detail?.title}</DialogTitle>
             <DialogDescription>
@@ -539,6 +546,7 @@ export default function DashboardPage() {
                   <TableHead>Role</TableHead>
                   <TableHead>Client</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Closed By</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -548,6 +556,16 @@ export default function DashboardPage() {
                     <TableCell className="text-muted-foreground">{r.client || "—"}</TableCell>
                     <TableCell>
                       <Badge variant={roleStatusVariant(r.status)}>{r.status.replace("_", " ")}</Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {r.status === "deal" && r.closed_by_name ? (
+                        <>
+                          {r.closed_by_name}
+                          <span className="ml-1 text-xs capitalize">({r.closed_by_type})</span>
+                        </>
+                      ) : (
+                        "—"
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

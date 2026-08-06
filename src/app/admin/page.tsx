@@ -15,6 +15,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -22,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Combobox } from "@/components/entry/combobox";
 import {
   fetchRoles,
   fetchSubmitters,
@@ -32,17 +40,19 @@ import {
   upsertSubmitter,
 } from "@/lib/data/queries";
 import { ROLE_STATUSES, roleStatusVariant } from "@/lib/data/role-status";
-import type { Role, RoleStatus, Submitter, SubmitterType } from "@/types/db";
+import type { RoleStatus, RoleView, Submitter, SubmitterType } from "@/types/db";
 
 export default function AdminPage() {
   const [submitters, setSubmitters] = useState<Submitter[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [roles, setRoles] = useState<RoleView[]>([]);
   const [newSubmitterName, setNewSubmitterName] = useState("");
   const [newSubmitterType, setNewSubmitterType] = useState<SubmitterType>("recruiter");
   const [newRoleName, setNewRoleName] = useState("");
   const [newRoleClient, setNewRoleClient] = useState("");
   const [editingClientId, setEditingClientId] = useState<string | null>(null);
   const [editingClientValue, setEditingClientValue] = useState("");
+  const [dealPickerRole, setDealPickerRole] = useState<RoleView | null>(null);
+  const [dealCloserId, setDealCloserId] = useState<string | null>(null);
 
   async function reload() {
     const [s, r] = await Promise.all([fetchSubmitters(), fetchRoles()]);
@@ -85,7 +95,7 @@ export default function AdminPage() {
     }
   }
 
-  function startEditClient(r: Role) {
+  function startEditClient(r: RoleView) {
     setEditingClientId(r.id);
     setEditingClientValue(r.client ?? "");
   }
@@ -111,7 +121,12 @@ export default function AdminPage() {
     }
   }
 
-  async function handleRoleStatusChange(r: Role, status: RoleStatus) {
+  async function handleRoleStatusChange(r: RoleView, status: RoleStatus) {
+    if (status === "deal") {
+      setDealPickerRole(r);
+      setDealCloserId(r.closed_by_id);
+      return;
+    }
     try {
       await setRoleStatus(r.id, status);
       reload();
@@ -120,6 +135,29 @@ export default function AdminPage() {
       console.error(err);
     }
   }
+
+  async function confirmDealCloser() {
+    if (!dealPickerRole) return;
+    if (!dealCloserId) {
+      toast.error("Pick who closed it first.");
+      return;
+    }
+    try {
+      await setRoleStatus(dealPickerRole.id, "deal", dealCloserId);
+      setDealPickerRole(null);
+      setDealCloserId(null);
+      reload();
+    } catch (err) {
+      toast.error("Update failed");
+      console.error(err);
+    }
+  }
+
+  const submitterOptions = submitters.map((s) => ({
+    value: s.id,
+    label: s.name,
+    hint: s.type,
+  }));
 
 
   return (
@@ -222,6 +260,7 @@ export default function AdminPage() {
                     <TableHead>Role</TableHead>
                     <TableHead>Client</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Closed By</TableHead>
                     <TableHead className="w-44" />
                   </TableRow>
                 </TableHeader>
@@ -255,6 +294,16 @@ export default function AdminPage() {
                       <TableCell>
                         <Badge variant={roleStatusVariant(r.status)}>{r.status.replace("_", " ")}</Badge>
                       </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {r.status === "deal" && r.closed_by_name ? (
+                          <>
+                            {r.closed_by_name}
+                            <span className="ml-1 text-xs capitalize">({r.closed_by_type})</span>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Select
                           value={r.status}
@@ -280,6 +329,31 @@ export default function AdminPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={dealPickerRole !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDealPickerRole(null);
+            setDealCloserId(null);
+          }
+        }}
+      >
+        <DialogContent className="glass-strong">
+          <DialogHeader>
+            <DialogTitle>Who closed &ldquo;{dealPickerRole?.name}&rdquo;?</DialogTitle>
+          </DialogHeader>
+          <Combobox
+            options={submitterOptions}
+            value={dealCloserId}
+            onChange={setDealCloserId}
+            placeholder="Select recruiter or vendor…"
+          />
+          <DialogFooter>
+            <Button onClick={confirmDealCloser}>Confirm deal</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
