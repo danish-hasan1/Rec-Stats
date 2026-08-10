@@ -27,14 +27,29 @@ import {
   upsertEntries,
   upsertRole,
   upsertSubmitter,
+  type NewEntry,
 } from "@/lib/data/queries";
 import type { EntryView, Role, Submitter, SubmitterType } from "@/types/db";
 import { AlertTriangle, Pencil, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const LAST_SUBMITTER_KEY = "recstats:lastSubmitter";
+
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
+
+type DraftRow = {
+  key: string;
+  roleId: string;
+  roleName: string;
+  submissions: number;
+  interviewL1: number;
+  interviewL2: number;
+  interviewL3: number;
+  dealRecruiterId: string | null;
+  markDeal: boolean;
+};
 
 export default function EntryPage() {
   const [submitters, setSubmitters] = useState<Submitter[]>([]);
@@ -54,6 +69,7 @@ export default function EntryPage() {
   const [interviewL3, setInterviewL3] = useState("0");
   const [dealRecruiterId, setDealRecruiterId] = useState<string | null>(null);
   const [markDeal, setMarkDeal] = useState(false);
+  const [rows, setRows] = useState<DraftRow[]>([]);
 
   const pendingDeletes = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
@@ -80,6 +96,23 @@ export default function EntryPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount
     reloadAll();
   }, []);
+
+  // Restore the last recruiter/vendor worked on so it survives page reloads
+  // and navigating away and back, not just staying selected across saves.
+  useEffect(() => {
+    const stored = window.localStorage.getItem(LAST_SUBMITTER_KEY);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored) as { type: SubmitterType; id: string };
+      if (submitters.some((s) => s.id === parsed.id && s.type === parsed.type)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setSubmitterType(parsed.type);
+        setSubmitterId(parsed.id);
+      }
+    } catch {
+      // ignore malformed storage
+    }
+  }, [submitters]);
 
   // Flush any pending (undo-able) deletes if the user navigates away mid-window.
   useEffect(() => {
@@ -110,6 +143,7 @@ export default function EntryPage() {
     [roles]
   );
 
+  const submitterName = submitters.find((s) => s.id === submitterId)?.name ?? "";
   const dateEntries = entries.filter((e) => e.date === date);
 
   const duplicateEntry =
@@ -119,10 +153,9 @@ export default function EntryPage() {
         )
       : undefined;
 
-  function resetForm() {
-    setEditingId(null);
-    setSubmitterType("recruiter");
-    setSubmitterId(null);
+  const duplicateInBatch = !editingId && roleId ? rows.find((r) => r.roleId === roleId) : undefined;
+
+  function resetRoleFields() {
     setRoleId(null);
     setSubmissions("0");
     setInterviewL1("0");
@@ -132,8 +165,36 @@ export default function EntryPage() {
     setMarkDeal(false);
   }
 
+  function resetForm() {
+    setEditingId(null);
+    setRows([]);
+    resetRoleFields();
+  }
+
+  function persistSubmitter(type: SubmitterType, id: string) {
+    window.localStorage.setItem(LAST_SUBMITTER_KEY, JSON.stringify({ type, id }));
+  }
+
+  function handleSubmitterTypeChange(t: SubmitterType) {
+    if (t === submitterType) return;
+    setSubmitterType(t);
+    setSubmitterId(null);
+    if (t === "recruiter") setDealRecruiterId(null);
+    setRows([]);
+    window.localStorage.removeItem(LAST_SUBMITTER_KEY);
+  }
+
+  function handleSubmitterChange(id: string) {
+    if (rows.length > 0 && id !== submitterId) {
+      setRows([]);
+    }
+    setSubmitterId(id);
+    persistSubmitter(submitterType, id);
+  }
+
   function handleEdit(e: EntryView) {
     setEditingId(e.id);
+    setRows([]);
     setDate(e.date);
     setSubmitterType(e.submitter_type);
     setSubmitterId(e.submitter_id);
@@ -151,7 +212,7 @@ export default function EntryPage() {
     try {
       const created = await upsertSubmitter(name, submitterType);
       setSubmitters((prev) => [...prev, created]);
-      setSubmitterId(created.id);
+      handleSubmitterChange(created.id);
       toast.success(`Added ${submitterType}: ${name}`);
     } catch (err) {
       toast.error("Could not create submitter");
@@ -171,28 +232,120 @@ export default function EntryPage() {
     }
   }
 
-  async function handleSubmit() {
-    if (!submitterId || !roleId) {
+  function readDraftCounts() {
+    return {
+      submissions: parseInt(submissions || "0", 10) || 0,
+      interviewL1: parseInt(interviewL1 || "0", 10) || 0,
+      interviewL2: parseInt(interviewL2 || "0", 10) || 0,
+      interviewL3: parseInt(interviewL3 || "0", 10) || 0,
+    };
+  }
+
+  function addRow() {
+    if (!roleId) {
+      toast.error("Pick a role first.");
+      return;
+    }
+    const counts = readDraftCounts();
+    const isBlank =
+      counts.submissions === 0 &&
+      counts.interviewL1 === 0 &&
+      counts.interviewL2 === 0 &&
+      counts.interviewL3 === 0;
+    if (isBlank && !markDeal) {
+      toast.error("Nothing to add — enter submissions or an interview count.");
+      return;
+    }
+
+    const roleName = roles.find((r) => r.id === roleId)?.name ?? "";
+    setRows((prev) => [
+      ...prev,
+      {
+        key: crypto.randomUUID(),
+        roleId,
+        roleName,
+        ...counts,
+        dealRecruiterId: submitterType === "vendor" ? dealRecruiterId : null,
+        markDeal,
+      },
+    ]);
+    resetRoleFields();
+  }
+
+  function removeRow(key: string) {
+    setRows((prev) => prev.filter((r) => r.key !== key));
+  }
+
+  async function saveAll() {
+    if (!submitterId) {
+      toast.error("Pick a submitter first.");
+      return;
+    }
+    if (rows.length === 0) {
+      toast.error("Add at least one entry to save.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payloads: NewEntry[] = rows.map((r) => ({
+        date,
+        submitter_id: submitterId,
+        role_id: r.roleId,
+        submissions: r.submissions,
+        interview_l1: r.interviewL1,
+        interview_l2: r.interviewL2,
+        interview_l3: r.interviewL3,
+        deal_recruiter_id: r.dealRecruiterId,
+      }));
+      await upsertEntries(payloads);
+
+      const deals = rows.filter((r) => r.markDeal);
+      for (const r of deals) {
+        // Credit the deal to whoever actually gets credit for it: the vendor's
+        // deal recruiter when one's set, otherwise the submitter themselves.
+        const closedById = submitterType === "vendor" && r.dealRecruiterId ? r.dealRecruiterId : submitterId;
+        await setRoleStatus(r.roleId, "deal", closedById);
+      }
+
+      toast.success(
+        `Saved ${rows.length} ${rows.length === 1 ? "entry" : "entries"} for ${submitterName}` +
+          (deals.length ? `, ${deals.length} marked as deal` : "")
+      );
+      setRows([]);
+      resetRoleFields();
+      await reloadAll();
+    } catch (err) {
+      toast.error("Save failed");
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUpdateEdit() {
+    if (!editingId || !submitterId || !roleId) {
       toast.error("Pick a submitter and role first.");
       return;
     }
 
-    const payload = {
+    const counts = readDraftCounts();
+    const payload: NewEntry = {
       date,
       submitter_id: submitterId,
       role_id: roleId,
-      submissions: parseInt(submissions || "0", 10) || 0,
-      interview_l1: parseInt(interviewL1 || "0", 10) || 0,
-      interview_l2: parseInt(interviewL2 || "0", 10) || 0,
-      interview_l3: parseInt(interviewL3 || "0", 10) || 0,
+      submissions: counts.submissions,
+      interview_l1: counts.interviewL1,
+      interview_l2: counts.interviewL2,
+      interview_l3: counts.interviewL3,
       deal_recruiter_id: submitterType === "vendor" ? dealRecruiterId : null,
     };
 
     const isBlank =
-      payload.submissions === 0 &&
-      payload.interview_l1 === 0 &&
-      payload.interview_l2 === 0 &&
-      payload.interview_l3 === 0;
+      counts.submissions === 0 &&
+      counts.interviewL1 === 0 &&
+      counts.interviewL2 === 0 &&
+      counts.interviewL3 === 0;
     if (isBlank && !markDeal) {
       toast.error("Nothing to save — enter submissions or an interview count.");
       return;
@@ -200,24 +353,14 @@ export default function EntryPage() {
 
     setSaving(true);
     try {
-      if (editingId) {
-        await updateEntry(editingId, payload);
-      } else {
-        await upsertEntries([payload]);
-      }
+      await updateEntry(editingId, payload);
 
       if (markDeal) {
-        // Credit the deal to whoever actually gets credit for it: the vendor's
-        // deal recruiter when one's set, otherwise the submitter themselves.
         const closedById = submitterType === "vendor" && dealRecruiterId ? dealRecruiterId : submitterId;
         await setRoleStatus(roleId, "deal", closedById);
       }
 
-      toast.success(
-        markDeal
-          ? `Entry ${editingId ? "updated" : "saved"}, role marked as deal`
-          : `Entry ${editingId ? "updated" : "saved"}`
-      );
+      toast.success(markDeal ? "Entry updated, role marked as deal" : "Entry updated");
       resetForm();
       await reloadAll();
     } catch (err) {
@@ -288,13 +431,10 @@ export default function EntryPage() {
                   <button
                     key={t}
                     type="button"
-                    onClick={() => {
-                      setSubmitterType(t);
-                      setSubmitterId(null);
-                      if (t === "recruiter") setDealRecruiterId(null);
-                    }}
+                    disabled={!editingId && rows.length > 0 && t !== submitterType}
+                    onClick={() => handleSubmitterTypeChange(t)}
                     className={cn(
-                      "flex-1 rounded px-3 py-1.5 text-sm capitalize transition-colors",
+                      "flex-1 rounded px-3 py-1.5 text-sm capitalize transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                       submitterType === t
                         ? "bg-primary text-primary-foreground"
                         : "hover:bg-accent"
@@ -311,11 +451,16 @@ export default function EntryPage() {
               <Combobox
                 options={submitterOptions}
                 value={submitterId}
-                onChange={setSubmitterId}
+                onChange={handleSubmitterChange}
                 onCreate={handleCreateSubmitter}
                 placeholder={`Select ${submitterType}…`}
                 createLabel="Add"
               />
+              {!editingId && submitterId && (
+                <p className="text-xs text-muted-foreground">
+                  Stays selected for the next entries — pick someone else above anytime.
+                </p>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5 sm:col-span-2">
@@ -390,21 +535,75 @@ export default function EntryPage() {
             </div>
           </div>
 
-          {duplicateEntry && (
+          {(duplicateEntry || duplicateInBatch) && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-600 dark:text-amber-400">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <span>
-                An entry already exists for this date, submitter, and role
-                ({duplicateEntry.submissions} subs, L1 {duplicateEntry.interview_l1} / L2{" "}
-                {duplicateEntry.interview_l2} / L3 {duplicateEntry.interview_l3}). Saving will
-                overwrite it — edit that row instead if you didn&rsquo;t mean to replace it.
-              </span>
+              {duplicateInBatch ? (
+                <span>
+                  This role is already staged below for {submitterName} — remove it first if you
+                  meant to replace it.
+                </span>
+              ) : (
+                <span>
+                  An entry already exists for this date, submitter, and role
+                  ({duplicateEntry!.submissions} subs, L1 {duplicateEntry!.interview_l1} / L2{" "}
+                  {duplicateEntry!.interview_l2} / L3 {duplicateEntry!.interview_l3}). Saving will
+                  overwrite it.
+                </span>
+              )}
             </div>
           )}
 
-          <Button onClick={handleSubmit} disabled={saving} className="w-fit">
-            {saving ? "Saving…" : editingId ? "Update entry" : "Save entry"}
-          </Button>
+          {editingId ? (
+            <Button onClick={handleUpdateEdit} disabled={saving} className="w-fit">
+              {saving ? "Saving…" : "Update entry"}
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                onClick={addRow}
+                disabled={!submitterId || !roleId}
+                className="w-fit"
+              >
+                + Add another entry
+              </Button>
+
+              {rows.length > 0 && (
+                <div className="divide-y rounded-lg border">
+                  {rows.map((r) => (
+                    <div key={r.key} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                      <span className="text-muted-foreground">
+                        <span className="font-medium text-foreground">{r.roleName}</span>
+                        {" — "}
+                        {r.submissions} subs
+                        {r.interviewL1 || r.interviewL2 || r.interviewL3
+                          ? ` · L1 ${r.interviewL1} / L2 ${r.interviewL2} / L3 ${r.interviewL3}`
+                          : ""}
+                        {r.markDeal ? " · deal" : ""}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => removeRow(r.key)}
+                        aria-label="Remove staged entry"
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <Button onClick={saveAll} disabled={rows.length === 0 || saving} className="w-fit">
+                {saving
+                  ? "Saving…"
+                  : rows.length === 0
+                    ? "Add at least one entry to save"
+                    : `Save ${rows.length} ${rows.length === 1 ? "entry" : "entries"} for ${submitterName}`}
+              </Button>
+            </>
+          )}
         </CardContent>
       </Card>
 
