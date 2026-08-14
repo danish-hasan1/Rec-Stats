@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
@@ -16,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Combobox } from "@/components/entry/combobox";
+import { Combobox, type ComboboxOption } from "@/components/entry/combobox";
 import {
   deleteEntry,
   fetchEntries,
@@ -29,11 +28,230 @@ import {
   upsertSubmitter,
 } from "@/lib/data/queries";
 import type { EntryView, Role, Submitter, SubmitterType } from "@/types/db";
-import { AlertTriangle, Pencil, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
+}
+
+type RowState = {
+  key: string;
+  entryId: string | null;
+  submitterType: SubmitterType;
+  submitterId: string | null;
+  roleId: string | null;
+  submissions: string;
+  interviewL1: string;
+  interviewL2: string;
+  interviewL3: string;
+  dealRecruiterId: string | null;
+  markDeal: boolean;
+};
+
+function emptyRow(key: string): RowState {
+  return {
+    key,
+    entryId: null,
+    submitterType: "recruiter",
+    submitterId: null,
+    roleId: null,
+    submissions: "",
+    interviewL1: "",
+    interviewL2: "",
+    interviewL3: "",
+    dealRecruiterId: null,
+    markDeal: false,
+  };
+}
+
+function rowFromEntry(e: EntryView): RowState {
+  return {
+    key: e.id,
+    entryId: e.id,
+    submitterType: e.submitter_type,
+    submitterId: e.submitter_id,
+    roleId: e.role_id,
+    submissions: String(e.submissions),
+    interviewL1: String(e.interview_l1),
+    interviewL2: String(e.interview_l2),
+    interviewL3: String(e.interview_l3),
+    dealRecruiterId: e.deal_recruiter_id,
+    markDeal: false,
+  };
+}
+
+let draftCounter = 0;
+function newDraftKey() {
+  draftCounter += 1;
+  return `draft-${Date.now()}-${draftCounter}`;
+}
+
+function GridRow({
+  row,
+  isNew,
+  dirty,
+  saving,
+  duplicate,
+  recruiterOptions,
+  vendorOptions,
+  roleOptions,
+  onChange,
+  onSave,
+  onDiscard,
+  onDelete,
+  onCreateSubmitter,
+  onCreateRole,
+}: {
+  row: RowState;
+  isNew: boolean;
+  dirty: boolean;
+  saving: boolean;
+  duplicate: boolean;
+  recruiterOptions: ComboboxOption[];
+  vendorOptions: ComboboxOption[];
+  roleOptions: ComboboxOption[];
+  onChange: (patch: Partial<RowState>) => void;
+  onSave: () => void;
+  onDiscard: () => void;
+  onDelete: () => void;
+  onCreateSubmitter: (name: string, type: SubmitterType) => void;
+  onCreateRole: (name: string) => void;
+}) {
+  const submitterOptions = row.submitterType === "recruiter" ? recruiterOptions : vendorOptions;
+  const showActions = isNew || dirty;
+
+  return (
+    <TableRow className={cn(isNew && "bg-primary/5", dirty && !isNew && "bg-accent/40")}>
+      <TableCell>
+        <div className="flex gap-1 rounded-md border p-0.5">
+          {(["recruiter", "vendor"] as SubmitterType[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => onChange({ submitterType: t, submitterId: null, dealRecruiterId: null })}
+              className={cn(
+                "flex-1 rounded px-2 py-1 text-xs capitalize transition-colors",
+                row.submitterType === t ? "bg-primary text-primary-foreground" : "hover:bg-accent"
+              )}
+            >
+              {t === "recruiter" ? "Rec" : "Ven"}
+            </button>
+          ))}
+        </div>
+      </TableCell>
+      <TableCell className="min-w-[170px]">
+        <Combobox
+          options={submitterOptions}
+          value={row.submitterId}
+          onChange={(v) => onChange({ submitterId: v })}
+          onCreate={(name) => onCreateSubmitter(name, row.submitterType)}
+          placeholder={row.submitterType === "recruiter" ? "Select recruiter…" : "Select vendor…"}
+          createLabel="Add"
+        />
+      </TableCell>
+      <TableCell className="min-w-[200px]">
+        <div className="flex items-center gap-1.5">
+          <Combobox
+            options={roleOptions}
+            value={row.roleId}
+            onChange={(v) => onChange({ roleId: v })}
+            onCreate={onCreateRole}
+            placeholder="Select role…"
+            createLabel="Add role"
+          />
+          {duplicate && (
+            <AlertTriangle
+              className="size-4 shrink-0 text-amber-500"
+              aria-label="Duplicate entry for this submitter and role"
+            >
+              <title>Already an entry for this submitter and role today — edit that row instead.</title>
+            </AlertTriangle>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="w-20">
+        <Input
+          type="number"
+          min={0}
+          value={row.submissions}
+          onChange={(e) => onChange({ submissions: e.target.value })}
+          className="text-right"
+        />
+      </TableCell>
+      <TableCell className="w-16">
+        <Input
+          type="number"
+          min={0}
+          value={row.interviewL1}
+          onChange={(e) => onChange({ interviewL1: e.target.value })}
+          className="text-right"
+        />
+      </TableCell>
+      <TableCell className="w-16">
+        <Input
+          type="number"
+          min={0}
+          value={row.interviewL2}
+          onChange={(e) => onChange({ interviewL2: e.target.value })}
+          className="text-right"
+        />
+      </TableCell>
+      <TableCell className="w-16">
+        <Input
+          type="number"
+          min={0}
+          value={row.interviewL3}
+          onChange={(e) => onChange({ interviewL3: e.target.value })}
+          className="text-right"
+        />
+      </TableCell>
+      <TableCell className="min-w-[160px]">
+        {row.submitterType === "vendor" ? (
+          <Combobox
+            options={recruiterOptions}
+            value={row.dealRecruiterId}
+            onChange={(v) => onChange({ dealRecruiterId: v })}
+            placeholder="Deal recruiter…"
+          />
+        ) : (
+          <span className="text-sm text-muted-foreground">—</span>
+        )}
+      </TableCell>
+      <TableCell className="w-16 text-center">
+        <Checkbox
+          checked={row.markDeal}
+          onCheckedChange={(v) => onChange({ markDeal: v === true })}
+          aria-label="Mark role as deal"
+          title="Mark role as deal (placement made)"
+        />
+      </TableCell>
+      <TableCell className="w-24">
+        <div className="flex justify-end gap-1">
+          {showActions && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onSave}
+              disabled={saving || duplicate}
+              aria-label="Save row"
+              title="Save"
+            >
+              <Check className="size-4" />
+            </Button>
+          )}
+          {!isNew && dirty && (
+            <Button variant="ghost" size="icon" onClick={onDiscard} aria-label="Discard changes" title="Discard changes">
+              <RotateCcw className="size-4" />
+            </Button>
+          )}
+          <Button variant="ghost" size="icon" onClick={onDelete} aria-label={isNew ? "Remove row" : "Delete entry"} title={isNew ? "Remove row" : "Delete"}>
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
 }
 
 export default function EntryPage() {
@@ -41,19 +259,11 @@ export default function EntryPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [entries, setEntries] = useState<EntryView[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
 
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [date, setDate] = useState(todayISO());
-  const [submitterType, setSubmitterType] = useState<SubmitterType>("recruiter");
-  const [submitterId, setSubmitterId] = useState<string | null>(null);
-  const [roleId, setRoleId] = useState<string | null>(null);
-  const [submissions, setSubmissions] = useState("0");
-  const [interviewL1, setInterviewL1] = useState("0");
-  const [interviewL2, setInterviewL2] = useState("0");
-  const [interviewL3, setInterviewL3] = useState("0");
-  const [dealRecruiterId, setDealRecruiterId] = useState<string | null>(null);
-  const [markDeal, setMarkDeal] = useState(false);
+  const [drafts, setDrafts] = useState<RowState[]>([]);
+  const [savedEdits, setSavedEdits] = useState<Map<string, RowState>>(new Map());
 
   const pendingDeletes = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
@@ -89,12 +299,19 @@ export default function EntryPage() {
     };
   }, []);
 
-  const submitterOptions = useMemo(
+  // Switching dates drops unsaved drafts/edits — they belong to the day being left.
+  function handleDateChange(next: string) {
+    setDate(next);
+    setDrafts([]);
+    setSavedEdits(new Map());
+  }
+
+  const dateEntries = useMemo(
     () =>
-      submitters
-        .filter((s) => s.type === submitterType)
-        .map((s) => ({ value: s.id, label: s.name, hint: s.status === "inactive" ? "inactive" : undefined })),
-    [submitters, submitterType]
+      entries
+        .filter((e) => e.date === date)
+        .sort((a, b) => a.submitter_name.localeCompare(b.submitter_name)),
+    [entries, date]
   );
 
   const recruiterOptions = useMemo(
@@ -104,88 +321,92 @@ export default function EntryPage() {
         .map((s) => ({ value: s.id, label: s.name, hint: s.status === "inactive" ? "inactive" : undefined })),
     [submitters]
   );
-
+  const vendorOptions = useMemo(
+    () =>
+      submitters
+        .filter((s) => s.type === "vendor")
+        .map((s) => ({ value: s.id, label: s.name, hint: s.status === "inactive" ? "inactive" : undefined })),
+    [submitters]
+  );
   const roleOptions = useMemo(
     () => roles.map((r) => ({ value: r.id, label: r.name, hint: r.status !== "open" ? r.status : undefined })),
     [roles]
   );
 
-  const dateEntries = entries.filter((e) => e.date === date);
-
-  const duplicateEntry =
-    !editingId && submitterId && roleId
-      ? entries.find(
-          (e) => e.date === date && e.submitter_id === submitterId && e.role_id === roleId
-        )
-      : undefined;
-
-  function resetForm() {
-    setEditingId(null);
-    setSubmitterType("recruiter");
-    setSubmitterId(null);
-    setRoleId(null);
-    setSubmissions("0");
-    setInterviewL1("0");
-    setInterviewL2("0");
-    setInterviewL3("0");
-    setDealRecruiterId(null);
-    setMarkDeal(false);
+  function addDraftRow() {
+    setDrafts((prev) => [...prev, emptyRow(newDraftKey())]);
   }
 
-  function handleEdit(e: EntryView) {
-    setEditingId(e.id);
-    setDate(e.date);
-    setSubmitterType(e.submitter_type);
-    setSubmitterId(e.submitter_id);
-    setRoleId(e.role_id);
-    setSubmissions(String(e.submissions));
-    setInterviewL1(String(e.interview_l1));
-    setInterviewL2(String(e.interview_l2));
-    setInterviewL3(String(e.interview_l3));
-    setDealRecruiterId(e.deal_recruiter_id);
-    setMarkDeal(false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  function updateDraft(key: string, patch: Partial<RowState>) {
+    setDrafts((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   }
 
-  async function handleCreateSubmitter(name: string) {
-    try {
-      const created = await upsertSubmitter(name, submitterType);
-      setSubmitters((prev) => [...prev, created]);
-      setSubmitterId(created.id);
-      toast.success(`Added ${submitterType}: ${name}`);
-    } catch (err) {
-      toast.error("Could not create submitter");
-      console.error(err);
-    }
+  function removeDraft(key: string) {
+    setDrafts((prev) => prev.filter((r) => r.key !== key));
   }
 
-  async function handleCreateRole(name: string) {
-    try {
-      const created = await upsertRole(name);
-      setRoles((prev) => [...prev, created]);
-      setRoleId(created.id);
-      toast.success(`Added role: ${name}`);
-    } catch (err) {
-      toast.error("Could not create role");
-      console.error(err);
-    }
+  function updateSaved(entryId: string, patch: Partial<RowState>) {
+    setSavedEdits((prev) => {
+      const next = new Map(prev);
+      const original = dateEntries.find((e) => e.id === entryId);
+      if (!original) return prev;
+      const base = next.get(entryId) ?? rowFromEntry(original);
+      next.set(entryId, { ...base, ...patch });
+      return next;
+    });
   }
 
-  async function handleSubmit() {
-    if (!submitterId || !roleId) {
+  function revertSaved(entryId: string) {
+    setSavedEdits((prev) => {
+      const next = new Map(prev);
+      next.delete(entryId);
+      return next;
+    });
+  }
+
+  function isDirty(entryId: string) {
+    const edited = savedEdits.get(entryId);
+    const original = dateEntries.find((e) => e.id === entryId);
+    if (!edited || !original) return false;
+    return (
+      edited.submitterType !== original.submitter_type ||
+      edited.submitterId !== original.submitter_id ||
+      edited.roleId !== original.role_id ||
+      edited.submissions !== String(original.submissions) ||
+      edited.interviewL1 !== String(original.interview_l1) ||
+      edited.interviewL2 !== String(original.interview_l2) ||
+      edited.interviewL3 !== String(original.interview_l3) ||
+      edited.dealRecruiterId !== original.deal_recruiter_id ||
+      edited.markDeal
+    );
+  }
+
+  function duplicateOf(row: RowState) {
+    if (!row.submitterId || !row.roleId) return false;
+    return dateEntries.some(
+      (e) => e.id !== row.entryId && e.submitter_id === row.submitterId && e.role_id === row.roleId
+    );
+  }
+
+  async function saveRow(row: RowState, isNew: boolean) {
+    if (!row.submitterId || !row.roleId) {
       toast.error("Pick a submitter and role first.");
+      return;
+    }
+    if (duplicateOf(row)) {
+      toast.error("An entry already exists for this submitter and role today — edit that row instead.");
       return;
     }
 
     const payload = {
       date,
-      submitter_id: submitterId,
-      role_id: roleId,
-      submissions: parseInt(submissions || "0", 10) || 0,
-      interview_l1: parseInt(interviewL1 || "0", 10) || 0,
-      interview_l2: parseInt(interviewL2 || "0", 10) || 0,
-      interview_l3: parseInt(interviewL3 || "0", 10) || 0,
-      deal_recruiter_id: submitterType === "vendor" ? dealRecruiterId : null,
+      submitter_id: row.submitterId,
+      role_id: row.roleId,
+      submissions: parseInt(row.submissions || "0", 10) || 0,
+      interview_l1: parseInt(row.interviewL1 || "0", 10) || 0,
+      interview_l2: parseInt(row.interviewL2 || "0", 10) || 0,
+      interview_l3: parseInt(row.interviewL3 || "0", 10) || 0,
+      deal_recruiter_id: row.submitterType === "vendor" ? row.dealRecruiterId : null,
     };
 
     const isBlank =
@@ -193,38 +414,63 @@ export default function EntryPage() {
       payload.interview_l1 === 0 &&
       payload.interview_l2 === 0 &&
       payload.interview_l3 === 0;
-    if (isBlank && !markDeal) {
+    if (isBlank && !row.markDeal) {
       toast.error("Nothing to save — enter submissions or an interview count.");
       return;
     }
 
-    setSaving(true);
+    setSavingKeys((prev) => new Set(prev).add(row.key));
     try {
-      if (editingId) {
-        await updateEntry(editingId, payload);
+      if (row.entryId) {
+        await updateEntry(row.entryId, payload);
       } else {
         await upsertEntries([payload]);
       }
-
-      if (markDeal) {
+      if (row.markDeal) {
         // Credit the deal to whoever actually gets credit for it: the vendor's
         // deal recruiter when one's set, otherwise the submitter themselves.
-        const closedById = submitterType === "vendor" && dealRecruiterId ? dealRecruiterId : submitterId;
-        await setRoleStatus(roleId, "deal", closedById);
+        const closedById = row.submitterType === "vendor" && row.dealRecruiterId ? row.dealRecruiterId : row.submitterId;
+        await setRoleStatus(row.roleId, "deal", closedById);
       }
-
-      toast.success(
-        markDeal
-          ? `Entry ${editingId ? "updated" : "saved"}, role marked as deal`
-          : `Entry ${editingId ? "updated" : "saved"}`
-      );
-      resetForm();
+      toast.success(row.markDeal ? "Saved, role marked as deal" : "Saved");
+      if (isNew) removeDraft(row.key);
+      else revertSaved(row.entryId!);
       await reloadAll();
     } catch (err) {
       toast.error("Save failed");
       console.error(err);
     } finally {
-      setSaving(false);
+      setSavingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(row.key);
+        return next;
+      });
+    }
+  }
+
+  async function handleCreateSubmitter(name: string, type: SubmitterType, key: string, isNew: boolean) {
+    try {
+      const created = await upsertSubmitter(name, type);
+      setSubmitters((prev) => [...prev, created]);
+      if (isNew) updateDraft(key, { submitterId: created.id });
+      else updateSaved(key, { submitterId: created.id });
+      toast.success(`Added ${type}: ${name}`);
+    } catch (err) {
+      toast.error("Could not create submitter");
+      console.error(err);
+    }
+  }
+
+  async function handleCreateRole(name: string, key: string, isNew: boolean) {
+    try {
+      const created = await upsertRole(name);
+      setRoles((prev) => [...prev, created]);
+      if (isNew) updateDraft(key, { roleId: created.id });
+      else updateSaved(key, { roleId: created.id });
+      toast.success(`Added role: ${name}`);
+    } catch (err) {
+      toast.error("Could not create role");
+      console.error(err);
     }
   }
 
@@ -233,7 +479,7 @@ export default function EntryPage() {
     if (!entry) return;
 
     setEntries((prev) => prev.filter((e) => e.id !== id));
-    if (editingId === id) resetForm();
+    revertSaved(id);
 
     const timeoutId = setTimeout(async () => {
       pendingDeletes.current.delete(id);
@@ -263,214 +509,99 @@ export default function EntryPage() {
     });
   }
 
+  const totalRows = dateEntries.length + drafts.length;
+
   return (
     <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Daily Entry</h1>
+          <p className="text-sm text-muted-foreground">
+            Pick a date, then add or edit rows directly in the grid — no separate form.
+          </p>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label>Date</Label>
+          <Input type="date" value={date} onChange={(e) => handleDateChange(e.target.value)} className="w-44" />
+        </div>
+      </div>
+
       <Card className="glass">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-xl">{editingId ? "Edit Entry" : "Daily Entry"}</CardTitle>
-          {editingId && (
-            <Button variant="ghost" size="sm" onClick={resetForm}>
-              <X className="mr-1 size-4" /> Cancel edit
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="flex flex-col gap-1.5">
-              <Label>Date</Label>
-              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label>Source</Label>
-              <div className="flex gap-1 rounded-md border p-1">
-                {(["recruiter", "vendor"] as SubmitterType[]).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => {
-                      setSubmitterType(t);
-                      setSubmitterId(null);
-                      if (t === "recruiter") setDealRecruiterId(null);
-                    }}
-                    className={cn(
-                      "flex-1 rounded px-3 py-1.5 text-sm capitalize transition-colors",
-                      submitterType === t
-                        ? "bg-primary text-primary-foreground"
-                        : "hover:bg-accent"
-                    )}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label>{submitterType === "recruiter" ? "Recruiter" : "Vendor"}</Label>
-              <Combobox
-                options={submitterOptions}
-                value={submitterId}
-                onChange={setSubmitterId}
-                onCreate={handleCreateSubmitter}
-                placeholder={`Select ${submitterType}…`}
-                createLabel="Add"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <Label>Role</Label>
-              <Combobox
-                options={roleOptions}
-                value={roleId}
-                onChange={setRoleId}
-                onCreate={handleCreateRole}
-                placeholder="Select role…"
-                createLabel="Add role"
-              />
-              <label className="flex items-center gap-2 pt-1 text-sm text-muted-foreground">
-                <Checkbox checked={markDeal} onCheckedChange={(v) => setMarkDeal(v === true)} />
-                Mark role as deal (placement made) — sets role status to &ldquo;deal&rdquo;
-              </label>
-            </div>
-
-            {submitterType === "vendor" && (
-              <div className="flex flex-col gap-1.5">
-                <Label>Deal recruiter (whose deal is this?)</Label>
-                <Combobox
-                  options={recruiterOptions}
-                  value={dealRecruiterId}
-                  onChange={setDealRecruiterId}
-                  placeholder="Select recruiter…"
-                />
-              </div>
-            )}
-
-            <div className="flex flex-col gap-1.5">
-              <Label>Submissions</Label>
-              <Input
-                type="number"
-                min={0}
-                value={submissions}
-                onChange={(e) => setSubmissions(e.target.value)}
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-3">
-              <Label>Interviews</Label>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-8 shrink-0 text-sm text-muted-foreground">L1</span>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={interviewL1}
-                    onChange={(e) => setInterviewL1(e.target.value)}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-8 shrink-0 text-sm text-muted-foreground">L2</span>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={interviewL2}
-                    onChange={(e) => setInterviewL2(e.target.value)}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-8 shrink-0 text-sm text-muted-foreground">L3</span>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={interviewL3}
-                    onChange={(e) => setInterviewL3(e.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {duplicateEntry && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <span>
-                An entry already exists for this date, submitter, and role
-                ({duplicateEntry.submissions} subs, L1 {duplicateEntry.interview_l1} / L2{" "}
-                {duplicateEntry.interview_l2} / L3 {duplicateEntry.interview_l3}). Saving will
-                overwrite it — edit that row instead if you didn&rsquo;t mean to replace it.
-              </span>
-            </div>
-          )}
-
-          <Button onClick={handleSubmit} disabled={saving} className="w-fit">
-            {saving ? "Saving…" : editingId ? "Update entry" : "Save entry"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card className="glass">
-        <CardHeader>
           <CardTitle className="text-lg">Entries for {date}</CardTitle>
+          <Button size="sm" onClick={addDraftRow}>
+            <Plus className="mr-1 size-4" /> Add row
+          </Button>
         </CardHeader>
         <CardContent>
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : dateEntries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No entries yet for this date.</p>
+          ) : totalRows === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No entries yet for this date — click &ldquo;Add row&rdquo; to start.
+            </p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead className="text-right">Submissions</TableHead>
-                  <TableHead className="text-right">L1</TableHead>
-                  <TableHead className="text-right">L2</TableHead>
-                  <TableHead className="text-right">L3</TableHead>
-                  <TableHead>Deal recruiter</TableHead>
-                  <TableHead className="w-20" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {dateEntries.map((e) => (
-                  <TableRow key={e.id} className={cn(editingId === e.id && "bg-accent/50")}>
-                    <TableCell>
-                      <Badge variant={e.submitter_type === "recruiter" ? "default" : "secondary"}>
-                        {e.submitter_type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{e.submitter_name}</TableCell>
-                    <TableCell>{e.role_name}</TableCell>
-                    <TableCell className="text-right">{e.submissions}</TableCell>
-                    <TableCell className="text-right">{e.interview_l1 || "—"}</TableCell>
-                    <TableCell className="text-right">{e.interview_l2 || "—"}</TableCell>
-                    <TableCell className="text-right">{e.interview_l3 || "—"}</TableCell>
-                    <TableCell className="text-muted-foreground">{e.deal_recruiter_name ?? "—"}</TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleEdit(e)}
-                          aria-label="Edit entry"
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(e.id)}
-                          aria-label="Delete entry"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-24">Source</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead className="text-right">Subs</TableHead>
+                    <TableHead className="text-right">L1</TableHead>
+                    <TableHead className="text-right">L2</TableHead>
+                    <TableHead className="text-right">L3</TableHead>
+                    <TableHead>Deal recruiter</TableHead>
+                    <TableHead className="text-center">Deal</TableHead>
+                    <TableHead className="w-24" />
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {dateEntries.map((e) => {
+                    const row = savedEdits.get(e.id) ?? rowFromEntry(e);
+                    return (
+                      <GridRow
+                        key={e.id}
+                        row={row}
+                        isNew={false}
+                        dirty={isDirty(e.id)}
+                        saving={savingKeys.has(row.key)}
+                        duplicate={duplicateOf(row)}
+                        recruiterOptions={recruiterOptions}
+                        vendorOptions={vendorOptions}
+                        roleOptions={roleOptions}
+                        onChange={(patch) => updateSaved(e.id, patch)}
+                        onSave={() => saveRow(row, false)}
+                        onDiscard={() => revertSaved(e.id)}
+                        onDelete={() => handleDelete(e.id)}
+                        onCreateSubmitter={(name, type) => handleCreateSubmitter(name, type, e.id, false)}
+                        onCreateRole={(name) => handleCreateRole(name, e.id, false)}
+                      />
+                    );
+                  })}
+                  {drafts.map((row) => (
+                    <GridRow
+                      key={row.key}
+                      row={row}
+                      isNew
+                      dirty={false}
+                      saving={savingKeys.has(row.key)}
+                      duplicate={duplicateOf(row)}
+                      recruiterOptions={recruiterOptions}
+                      vendorOptions={vendorOptions}
+                      roleOptions={roleOptions}
+                      onChange={(patch) => updateDraft(row.key, patch)}
+                      onSave={() => saveRow(row, true)}
+                      onDiscard={() => {}}
+                      onDelete={() => removeDraft(row.key)}
+                      onCreateSubmitter={(name, type) => handleCreateSubmitter(name, type, row.key, true)}
+                      onCreateRole={(name) => handleCreateRole(name, row.key, true)}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>

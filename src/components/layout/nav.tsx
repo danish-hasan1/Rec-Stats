@@ -10,6 +10,7 @@ import {
   Users,
   CalendarRange,
   FileDown,
+  Percent,
 } from "lucide-react";
 
 const links = [
@@ -17,6 +18,7 @@ const links = [
   { href: "/entry", label: "Daily Entry", icon: PlusCircle },
   { href: "/import", label: "Paste Import", icon: ClipboardPaste },
   { href: "/summary", label: "Summary", icon: CalendarRange },
+  { href: "/conversion", label: "Conversion", icon: Percent },
   { href: "/reports", label: "Reports", icon: FileDown },
   { href: "/admin", label: "Admin", icon: Users },
 ];
