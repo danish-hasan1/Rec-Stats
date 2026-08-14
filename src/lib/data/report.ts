@@ -1,27 +1,8 @@
 import ExcelJS from "exceljs";
 import type { EntryView } from "@/types/db";
+import { BAND, BRAND, HEADER_TEXT, STATUS_FILL, csvEscape, thinBorder, triggerDownload } from "@/lib/data/report-style";
 
 export type ReportRow = EntryView & { role_status: string };
-
-const BRAND = "FF18181B"; // near-black header band, matches the app's dark UI accents
-const HEADER_TEXT = "FFFFFFFF";
-const BAND = "FFF4F4F5"; // subtle zebra stripe
-const BORDER = "FFE4E4E7";
-
-const STATUS_FILL: Record<string, string> = {
-  open: "FFDCFCE7", // green
-  deal: "FFDDE9FE", // blue
-  on_hold: "FFFEF3C7", // amber
-  cancelled: "FFF1F1F1", // gray
-  lost: "FFFEE2E2", // red
-};
-
-const thinBorder = {
-  top: { style: "thin" as const, color: { argb: BORDER } },
-  left: { style: "thin" as const, color: { argb: BORDER } },
-  bottom: { style: "thin" as const, color: { argb: BORDER } },
-  right: { style: "thin" as const, color: { argb: BORDER } },
-};
 
 export async function buildReportWorkbook(rows: ReportRow[], title: string) {
   const workbook = new ExcelJS.Workbook();
@@ -140,17 +121,6 @@ export async function buildReportWorkbook(rows: ReportRow[], title: string) {
   return workbook;
 }
 
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 export async function downloadReport(rows: ReportRow[], title: string, filename: string) {
   const workbook = await buildReportWorkbook(rows, title);
   const buffer = await workbook.xlsx.writeBuffer();
@@ -173,11 +143,6 @@ const CSV_HEADERS = [
   "Deal Recruiter",
   "Notes",
 ];
-
-function csvEscape(value: string | number) {
-  const s = String(value);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
 
 export function downloadReportCsv(rows: ReportRow[], filename: string) {
   const lines = [
