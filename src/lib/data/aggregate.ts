@@ -78,6 +78,25 @@ export function bySubmitter(entries: EntryView[]): SubmitterRow[] {
   return [...map.values()].sort((a, b) => b.totalSubs - a.totalSubs);
 }
 
+export type ConversionRates = {
+  subToL1: number | null;
+  l1ToL2: number | null;
+  l2ToL3: number | null;
+  subToL2: number | null;
+  subToL3: number | null;
+};
+
+export function conversionRates(t: Totals): ConversionRates {
+  const pct = (num: number, den: number) => (den > 0 ? (num / den) * 100 : null);
+  return {
+    subToL1: pct(t.interviewL1, t.totalSubs),
+    l1ToL2: pct(t.interviewL2, t.interviewL1),
+    l2ToL3: pct(t.interviewL3, t.interviewL2),
+    subToL2: pct(t.interviewL2, t.totalSubs),
+    subToL3: pct(t.interviewL3, t.totalSubs),
+  };
+}
+
 export function byRole(entries: EntryView[]) {
   const map = new Map<string, Totals & { id: string; name: string }>();
   for (const e of entries) {
