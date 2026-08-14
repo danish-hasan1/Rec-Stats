@@ -1,4 +1,4 @@
-import type { EntryView } from "@/types/db";
+import type { EntryView, RoleView } from "@/types/db";
 
 export type Totals = {
   recruiterSubs: number;
@@ -95,6 +95,29 @@ export function conversionRates(t: Totals): ConversionRates {
     subToL2: pct(t.interviewL2, t.totalSubs),
     subToL3: pct(t.interviewL3, t.totalSubs),
   };
+}
+
+export type DealStats = {
+  roles: number;
+  deals: number;
+  ratio: number | null;
+};
+
+// Deal ratio = roles that closed as a "deal" / distinct roles touched by the
+// given entries. When closedById is set, only deals credited to that person
+// count (e.g. a recruiter's own placements out of the roles they worked).
+export function dealStats(entries: EntryView[], roles: RoleView[], closedById?: string | null): DealStats {
+  const rolesById = new Map(roles.map((r) => [r.id, r]));
+  const roleIds = new Set(entries.map((e) => e.role_id));
+  let deals = 0;
+  for (const id of roleIds) {
+    const role = rolesById.get(id);
+    if (!role || role.status !== "deal") continue;
+    if (closedById && role.closed_by_id !== closedById) continue;
+    deals += 1;
+  }
+  const total = roleIds.size;
+  return { roles: total, deals, ratio: total > 0 ? (deals / total) * 100 : null };
 }
 
 export function byRole(entries: EntryView[]) {

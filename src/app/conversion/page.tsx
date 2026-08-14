@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -25,13 +27,17 @@ import { FunnelBar } from "@/components/dashboard/funnel-bar";
 import { fetchEntries, fetchRoles, fetchSubmitters } from "@/lib/data/queries";
 import {
   conversionRates,
+  dealStats,
   startOfMonth,
   sumEntries,
   toISODate,
+  type DealStats,
   type Totals,
 } from "@/lib/data/aggregate";
+import { downloadConversionReport, downloadConversionReportCsv } from "@/lib/data/conversion-report";
+import { roleStatusVariant } from "@/lib/data/role-status";
 import type { EntryView, RoleView, Submitter } from "@/types/db";
-import { Send, UserCheck, Percent, Layers } from "lucide-react";
+import { Send, UserCheck, Percent, Layers, Download, FileSpreadsheet } from "lucide-react";
 
 const ALL = "__all__";
 
@@ -39,7 +45,7 @@ function pctLabel(v: number | null) {
   return v === null ? "—" : `${Math.round(v)}%`;
 }
 
-function StageWiseCard({ totals, title }: { totals: Totals; title: string }) {
+function StageWiseCard({ totals, deal, title }: { totals: Totals; deal: DealStats; title: string }) {
   const rates = conversionRates(totals);
   const funnelMax = totals.totalSubs;
   return (
@@ -56,7 +62,7 @@ function StageWiseCard({ totals, title }: { totals: Totals; title: string }) {
             <FunnelBar label="L1" value={totals.interviewL1} max={funnelMax} color="var(--chart-2)" />
             <FunnelBar label="L2" value={totals.interviewL2} max={funnelMax} color="var(--chart-3)" />
             <FunnelBar label="L3" value={totals.interviewL3} max={funnelMax} color="var(--chart-4)" />
-            <div className="grid grid-cols-2 gap-3 border-t pt-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 border-t pt-3 sm:grid-cols-5">
               <div>
                 <p className="text-xs text-muted-foreground">Subs → L1</p>
                 <p className="text-lg font-semibold">{pctLabel(rates.subToL1)}</p>
@@ -73,6 +79,13 @@ function StageWiseCard({ totals, title }: { totals: Totals; title: string }) {
                 <p className="text-xs text-muted-foreground">Subs → L2</p>
                 <p className="text-lg font-semibold">{pctLabel(rates.subToL2)}</p>
               </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Deal ratio</p>
+                <p className="text-lg font-semibold">{pctLabel(deal.ratio)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {deal.deals}/{deal.roles} roles
+                </p>
+              </div>
             </div>
           </>
         )}
@@ -86,6 +99,7 @@ export default function ConversionPage() {
   const [roles, setRoles] = useState<RoleView[]>([]);
   const [submitters, setSubmitters] = useState<Submitter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
 
   const today = useMemo(() => new Date(), []);
   const [from, setFrom] = useState(toISODate(startOfMonth(today)));
@@ -111,6 +125,7 @@ export default function ConversionPage() {
     () => submitters.filter((s) => s.type === "recruiter").sort((a, b) => a.name.localeCompare(b.name)),
     [submitters]
   );
+  const rolesById = useMemo(() => new Map(roles.map((r) => [r.id, r])), [roles]);
 
   const dateEntries = useMemo(
     () => entries.filter((e) => e.date >= from && e.date <= to),
@@ -134,16 +149,25 @@ export default function ConversionPage() {
     [dateEntries, recruiterFilter]
   );
   const roleWiseRows = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; totals: Totals }>();
+    const map = new Map<string, EntryView[]>();
     for (const e of roleWiseEntries) {
-      const row = map.get(e.role_id) ?? { id: e.role_id, name: e.role_name, totals: sumEntries([]) };
-      map.set(e.role_id, row);
+      const list = map.get(e.role_id) ?? [];
+      list.push(e);
+      map.set(e.role_id, list);
     }
-    for (const row of map.values()) {
-      row.totals = sumEntries(roleWiseEntries.filter((e) => e.role_id === row.id));
-    }
-    return [...map.values()].sort((a, b) => b.totals.totalSubs - a.totals.totalSubs);
-  }, [roleWiseEntries]);
+    return [...map.entries()]
+      .map(([roleId, es]) => {
+        const role = rolesById.get(roleId);
+        return {
+          id: roleId,
+          name: es[0].role_name,
+          status: role?.status ?? "open",
+          closedByName: role?.status === "deal" ? role.closed_by_name : null,
+          totals: sumEntries(es),
+        };
+      })
+      .sort((a, b) => b.totals.totalSubs - a.totals.totalSubs);
+  }, [roleWiseEntries, rolesById]);
 
   // Recruiter-wise breakdown honors the role filter, so you can see every
   // recruiter's conversion for a single role.
@@ -152,29 +176,99 @@ export default function ConversionPage() {
     [dateEntries, roleFilter]
   );
   const recruiterWiseRows = useMemo(() => {
-    const byId = new Map<string, { id: string; name: string; type: string }>();
+    const map = new Map<string, EntryView[]>();
     for (const e of recruiterWiseEntries) {
-      if (!byId.has(e.submitter_id)) {
-        byId.set(e.submitter_id, { id: e.submitter_id, name: e.submitter_name, type: e.submitter_type });
-      }
+      const list = map.get(e.submitter_id) ?? [];
+      list.push(e);
+      map.set(e.submitter_id, list);
     }
-    return [...byId.values()]
-      .map((s) => ({
-        ...s,
-        totals: sumEntries(recruiterWiseEntries.filter((e) => e.submitter_id === s.id)),
+    return [...map.entries()]
+      .map(([submitterId, es]) => ({
+        id: submitterId,
+        name: es[0].submitter_name,
+        type: es[0].submitter_type,
+        totals: sumEntries(es),
+        deal: dealStats(es, roles, submitterId),
       }))
       .sort((a, b) => b.totals.totalSubs - a.totals.totalSubs);
-  }, [recruiterWiseEntries]);
+  }, [recruiterWiseEntries, roles]);
 
-  const stageTotals = sumEntries(dateEntries);
+  const scopeIsFiltered = roleFilter !== ALL || recruiterFilter !== ALL;
+  const scopeEntries = scopeIsFiltered ? selectedEntries : dateEntries;
+  const scopeTotals = scopeIsFiltered ? selectedTotals : sumEntries(dateEntries);
+  const scopeDeal = useMemo(
+    () => dealStats(scopeEntries, roles, recruiterFilter !== ALL ? recruiterFilter : undefined),
+    [scopeEntries, roles, recruiterFilter]
+  );
+
+  const roleFilterName = roleFilter === ALL ? null : rolesById.get(roleFilter)?.name ?? null;
+  const recruiterFilterName = recruiterFilter === ALL ? null : submitters.find((s) => s.id === recruiterFilter)?.name ?? null;
+
+  function buildReportInput() {
+    return {
+      from,
+      to,
+      roleFilterName,
+      recruiterFilterName,
+      summary: {
+        totals: scopeTotals,
+        rates: conversionRates(scopeTotals),
+        deal: scopeDeal,
+      },
+      byRole: roleWiseRows.map((r) => ({
+        name: r.name,
+        status: r.status,
+        closedByName: r.closedByName,
+        totals: r.totals,
+        rates: conversionRates(r.totals),
+      })),
+      byRecruiter: recruiterWiseRows.map((r) => ({
+        name: r.name,
+        type: r.type,
+        totals: r.totals,
+        rates: conversionRates(r.totals),
+        deal: r.deal,
+      })),
+    };
+  }
+
+  async function handleDownloadExcel() {
+    setDownloading(true);
+    try {
+      await downloadConversionReport(buildReportInput(), `conversion-report_${from}_to_${to}.xlsx`);
+      toast.success("Downloaded conversion report (Excel)");
+    } catch (err) {
+      toast.error("Report generation failed");
+      console.error(err);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  function handleDownloadCsv() {
+    downloadConversionReportCsv(buildReportInput(), `conversion-report_${from}_to_${to}.csv`);
+    toast.success("Downloaded conversion report (CSV)");
+  }
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Conversion</h1>
-        <p className="text-sm text-muted-foreground">
-          Percentage conversion from submissions to L1/L2 — by stage, role, and recruiter.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Conversion</h1>
+          <p className="text-sm text-muted-foreground">
+            Percentage conversion from submissions to L1/L2/deal — by stage, role, and recruiter.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={handleDownloadExcel} disabled={downloading || loading} variant="outline">
+            <FileSpreadsheet className="mr-1 size-4" />
+            {downloading ? "Generating…" : "Download report — Excel"}
+          </Button>
+          <Button onClick={handleDownloadCsv} disabled={loading} variant="outline">
+            <Download className="mr-1 size-4" />
+            CSV
+          </Button>
+        </div>
       </div>
 
       <Card className="glass">
@@ -227,8 +321,8 @@ export default function ConversionPage() {
         </CardContent>
       </Card>
 
-      {(roleFilter !== ALL || recruiterFilter !== ALL) && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      {scopeIsFiltered && (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           <KpiCard
             label="Selection — Submissions"
             value={loading ? "…" : selectedTotals.totalSubs}
@@ -253,16 +347,20 @@ export default function ConversionPage() {
             icon={Layers}
             accent="chart-4"
           />
+          <KpiCard
+            label="Deal ratio"
+            value={loading ? "…" : pctLabel(scopeDeal.ratio)}
+            sub={`${scopeDeal.deals}/${scopeDeal.roles} roles`}
+            icon={Percent}
+            accent="primary"
+          />
         </div>
       )}
 
       <StageWiseCard
-        totals={roleFilter === ALL && recruiterFilter === ALL ? stageTotals : selectedTotals}
-        title={
-          roleFilter === ALL && recruiterFilter === ALL
-            ? "Stage-wise conversion — selected period"
-            : "Stage-wise conversion — current selection"
-        }
+        totals={scopeTotals}
+        deal={scopeDeal}
+        title={scopeIsFiltered ? "Stage-wise conversion — current selection" : "Stage-wise conversion — selected period"}
       />
 
       <Card className="glass">
@@ -282,6 +380,7 @@ export default function ConversionPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Role</TableHead>
+                    <TableHead>Deal</TableHead>
                     <TableHead className="text-right">Subs</TableHead>
                     <TableHead className="text-right">L1</TableHead>
                     <TableHead className="text-right">L2</TableHead>
@@ -296,6 +395,15 @@ export default function ConversionPage() {
                     return (
                       <TableRow key={r.id}>
                         <TableCell className="font-medium">{r.name}</TableCell>
+                        <TableCell>
+                          {r.status === "deal" ? (
+                            <Badge variant={roleStatusVariant(r.status)}>
+                              {r.closedByName ?? "deal"}
+                            </Badge>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right">{r.totals.totalSubs}</TableCell>
                         <TableCell className="text-right">{r.totals.interviewL1 || "—"}</TableCell>
                         <TableCell className="text-right">{r.totals.interviewL2 || "—"}</TableCell>
@@ -333,6 +441,9 @@ export default function ConversionPage() {
                     <TableHead className="text-right">Subs</TableHead>
                     <TableHead className="text-right">L1</TableHead>
                     <TableHead className="text-right">L2</TableHead>
+                    <TableHead className="text-right">Roles</TableHead>
+                    <TableHead className="text-right">Deals</TableHead>
+                    <TableHead className="text-right">Deal Ratio</TableHead>
                     <TableHead className="text-right">Subs → L1</TableHead>
                     <TableHead className="text-right">L1 → L2</TableHead>
                     <TableHead className="text-right">Subs → L2</TableHead>
@@ -348,9 +459,12 @@ export default function ConversionPage() {
                         <TableCell className="text-right">{r.totals.totalSubs}</TableCell>
                         <TableCell className="text-right">{r.totals.interviewL1 || "—"}</TableCell>
                         <TableCell className="text-right">{r.totals.interviewL2 || "—"}</TableCell>
+                        <TableCell className="text-right">{r.deal.roles}</TableCell>
+                        <TableCell className="text-right">{r.deal.deals || "—"}</TableCell>
+                        <TableCell className="text-right font-semibold">{pctLabel(r.deal.ratio)}</TableCell>
                         <TableCell className="text-right">{pctLabel(rates.subToL1)}</TableCell>
                         <TableCell className="text-right">{pctLabel(rates.l1ToL2)}</TableCell>
-                        <TableCell className="text-right font-semibold">{pctLabel(rates.subToL2)}</TableCell>
+                        <TableCell className="text-right">{pctLabel(rates.subToL2)}</TableCell>
                       </TableRow>
                     );
                   })}
