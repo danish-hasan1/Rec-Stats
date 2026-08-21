@@ -31,6 +31,7 @@ import {
   startOfMonth,
   sumEntries,
   toISODate,
+  unaccountedDeals,
   type DealStats,
   type Totals,
 } from "@/lib/data/aggregate";
@@ -144,6 +145,13 @@ export default function ConversionPage() {
   );
   const selectedTotals = sumEntries(selectedEntries);
 
+  // Deal roles with zero entries ever (e.g. a placement tracked purely via
+  // role status in Admin, never logged through Daily Entry) can't appear in
+  // any entries-based breakdown below. Merge them back in wherever they
+  // still match the active role/recruiter filters — they have no date of
+  // their own, so the date range filter doesn't apply to them.
+  const allUnaccountedDeals = useMemo(() => unaccountedDeals(roles, entries), [roles, entries]);
+
   // Role-wise breakdown honors the recruiter filter, so you can see a single
   // recruiter's conversion across every role they touched.
   const roleWiseEntries = useMemo(
@@ -151,25 +159,36 @@ export default function ConversionPage() {
     [dateEntries, recruiterFilter]
   );
   const roleWiseRows = useMemo(() => {
-    const map = new Map<string, EntryView[]>();
+    const map = new Map<string, { id: string; name: string; status: string; closedByName: string | null; totals: Totals }>();
+    const grouped = new Map<string, EntryView[]>();
     for (const e of roleWiseEntries) {
-      const list = map.get(e.role_id) ?? [];
+      const list = grouped.get(e.role_id) ?? [];
       list.push(e);
-      map.set(e.role_id, list);
+      grouped.set(e.role_id, list);
     }
-    return [...map.entries()]
-      .map(([roleId, es]) => {
-        const role = rolesById.get(roleId);
-        return {
-          id: roleId,
-          name: es[0].role_name,
-          status: role?.status ?? "open",
-          closedByName: role?.status === "deal" ? role.closed_by_name : null,
-          totals: sumEntries(es),
-        };
-      })
-      .sort((a, b) => b.totals.totalSubs - a.totals.totalSubs);
-  }, [roleWiseEntries, rolesById]);
+    for (const [roleId, es] of grouped) {
+      const role = rolesById.get(roleId);
+      map.set(roleId, {
+        id: roleId,
+        name: es[0].role_name,
+        status: role?.status ?? "open",
+        closedByName: role?.status === "deal" ? role.closed_by_name : null,
+        totals: sumEntries(es),
+      });
+    }
+    for (const d of allUnaccountedDeals) {
+      if (map.has(d.roleId)) continue;
+      if (recruiterFilter !== ALL && d.closedById !== recruiterFilter) continue;
+      map.set(d.roleId, {
+        id: d.roleId,
+        name: d.roleName,
+        status: "deal",
+        closedByName: d.closedByName,
+        totals: sumEntries([]),
+      });
+    }
+    return [...map.values()].sort((a, b) => b.totals.totalSubs - a.totals.totalSubs);
+  }, [roleWiseEntries, rolesById, allUnaccountedDeals, recruiterFilter]);
 
   // Recruiter-wise breakdown honors the role filter, so you can see every
   // recruiter's conversion for a single role.
@@ -178,30 +197,57 @@ export default function ConversionPage() {
     [dateEntries, roleFilter]
   );
   const recruiterWiseRows = useMemo(() => {
-    const map = new Map<string, EntryView[]>();
+    const map = new Map<string, { id: string; name: string; type: string; totals: Totals; deal: DealStats }>();
+    const grouped = new Map<string, EntryView[]>();
     for (const e of recruiterWiseEntries) {
-      const list = map.get(e.submitter_id) ?? [];
+      const list = grouped.get(e.submitter_id) ?? [];
       list.push(e);
-      map.set(e.submitter_id, list);
+      grouped.set(e.submitter_id, list);
     }
-    return [...map.entries()]
-      .map(([submitterId, es]) => ({
+    for (const [submitterId, es] of grouped) {
+      map.set(submitterId, {
         id: submitterId,
         name: es[0].submitter_name,
         type: es[0].submitter_type,
         totals: sumEntries(es),
         deal: dealStats(es, roles, submitterId),
-      }))
-      .sort((a, b) => b.totals.totalSubs - a.totals.totalSubs);
-  }, [recruiterWiseEntries, roles]);
+      });
+    }
+    for (const d of allUnaccountedDeals) {
+      if (!d.closedById) continue;
+      if (roleFilter !== ALL && d.roleId !== roleFilter) continue;
+      const existing = map.get(d.closedById);
+      if (existing) {
+        const roles2 = existing.deal.roles + 1;
+        const deals2 = existing.deal.deals + 1;
+        existing.deal = { roles: roles2, deals: deals2, ratio: (deals2 / roles2) * 100 };
+      } else {
+        map.set(d.closedById, {
+          id: d.closedById,
+          name: d.closedByName ?? "Unknown",
+          type: d.closedByType ?? "recruiter",
+          totals: sumEntries([]),
+          deal: { roles: 1, deals: 1, ratio: 100 },
+        });
+      }
+    }
+    return [...map.values()].sort((a, b) => b.totals.totalSubs - a.totals.totalSubs);
+  }, [recruiterWiseEntries, roles, allUnaccountedDeals, roleFilter]);
 
   const scopeIsFiltered = roleFilter !== ALL || recruiterFilter !== ALL;
   const scopeEntries = scopeIsFiltered ? selectedEntries : dateEntries;
   const scopeTotals = scopeIsFiltered ? selectedTotals : sumEntries(dateEntries);
-  const scopeDeal = useMemo(
-    () => dealStats(scopeEntries, roles, recruiterFilter !== ALL ? recruiterFilter : undefined),
-    [scopeEntries, roles, recruiterFilter]
-  );
+  const scopeDeal = useMemo(() => {
+    const base = dealStats(scopeEntries, roles, recruiterFilter !== ALL ? recruiterFilter : undefined);
+    const extra = allUnaccountedDeals.filter(
+      (d) =>
+        (roleFilter === ALL || d.roleId === roleFilter) &&
+        (recruiterFilter === ALL || d.closedById === recruiterFilter)
+    ).length;
+    const roles2 = base.roles + extra;
+    const deals2 = base.deals + extra;
+    return { roles: roles2, deals: deals2, ratio: roles2 > 0 ? (deals2 / roles2) * 100 : null };
+  }, [scopeEntries, roles, recruiterFilter, roleFilter, allUnaccountedDeals]);
 
   const roleFilterName = roleFilter === ALL ? null : rolesById.get(roleFilter)?.name ?? null;
   const recruiterFilterName = recruiterFilter === ALL ? null : submitters.find((s) => s.id === recruiterFilter)?.name ?? null;

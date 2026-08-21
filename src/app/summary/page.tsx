@@ -19,9 +19,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { fetchEntries } from "@/lib/data/queries";
-import { bySubmitter, sumEntries } from "@/lib/data/aggregate";
-import type { EntryView } from "@/types/db";
+import { fetchEntries, fetchRoles } from "@/lib/data/queries";
+import { bySubmitter, dealStats, groupBySubmitterWithEntries, sumEntries } from "@/lib/data/aggregate";
+import type { EntryView, RoleView } from "@/types/db";
 
 function monthLabel(key: string) {
   const [y, m] = key.split("-");
@@ -33,13 +33,15 @@ function monthLabel(key: string) {
 
 export default function SummaryPage() {
   const [entries, setEntries] = useState<EntryView[]>([]);
+  const [roles, setRoles] = useState<RoleView[]>([]);
   const [loading, setLoading] = useState(true);
   const [month, setMonth] = useState<string>("");
 
   useEffect(() => {
-    fetchEntries("2000-01-01", "2100-01-01")
-      .then((e) => {
+    Promise.all([fetchEntries("2000-01-01", "2100-01-01"), fetchRoles()])
+      .then(([e, r]) => {
         setEntries(e);
+        setRoles(r);
         const current = new Date().toISOString().slice(0, 7);
         setMonth(current);
       })
@@ -60,6 +62,13 @@ export default function SummaryPage() {
   const rows = bySubmitter(monthEntries);
   const totals = sumEntries(monthEntries);
   const dealVendorTotal = rows.reduce((sum, r) => sum + r.dealVendorSubs, 0);
+
+  // Deal stats need each submitter's own entries (not the vendor-credit-merged
+  // totals bySubmitter produces), so compute them from a separate grouping.
+  const dealBySubmitterId = new Map(
+    groupBySubmitterWithEntries(monthEntries).map((g) => [g.id, dealStats(g.entries, roles, g.id)])
+  );
+  const monthDeal = dealStats(monthEntries, roles);
 
   return (
     <div className="flex flex-col gap-6">
@@ -103,25 +112,34 @@ export default function SummaryPage() {
                   <TableHead className="text-right">L2</TableHead>
                   <TableHead className="text-right">L3</TableHead>
                   <TableHead className="text-right">Total Subs</TableHead>
+                  <TableHead className="text-right">Deals</TableHead>
+                  <TableHead className="text-right">Deal Ratio</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((r) => (
-                  <TableRow key={r.name}>
-                    <TableCell className="font-medium">{r.name}</TableCell>
-                    <TableCell className="capitalize text-muted-foreground">{r.type}</TableCell>
-                    <TableCell className="text-right">
-                      {r.type === "recruiter" ? r.recruiterSubs : r.vendorSubs}
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {r.type === "recruiter" ? r.dealVendorSubs || "—" : "—"}
-                    </TableCell>
-                    <TableCell className="text-right">{r.interviewL1 || "—"}</TableCell>
-                    <TableCell className="text-right">{r.interviewL2 || "—"}</TableCell>
-                    <TableCell className="text-right">{r.interviewL3 || "—"}</TableCell>
-                    <TableCell className="text-right font-semibold">{r.totalSubs}</TableCell>
-                  </TableRow>
-                ))}
+                {rows.map((r) => {
+                  const deal = dealBySubmitterId.get(r.id);
+                  return (
+                    <TableRow key={r.name}>
+                      <TableCell className="font-medium">{r.name}</TableCell>
+                      <TableCell className="capitalize text-muted-foreground">{r.type}</TableCell>
+                      <TableCell className="text-right">
+                        {r.type === "recruiter" ? r.recruiterSubs : r.vendorSubs}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {r.type === "recruiter" ? r.dealVendorSubs || "—" : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">{r.interviewL1 || "—"}</TableCell>
+                      <TableCell className="text-right">{r.interviewL2 || "—"}</TableCell>
+                      <TableCell className="text-right">{r.interviewL3 || "—"}</TableCell>
+                      <TableCell className="text-right font-semibold">{r.totalSubs}</TableCell>
+                      <TableCell className="text-right">{deal?.deals || "—"}</TableCell>
+                      <TableCell className="text-right">
+                        {deal?.ratio === null || deal?.ratio === undefined ? "—" : `${Math.round(deal.ratio)}%`}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
               <TableFooter>
                 <TableRow>
@@ -132,6 +150,10 @@ export default function SummaryPage() {
                   <TableCell className="text-right">{totals.interviewL2}</TableCell>
                   <TableCell className="text-right">{totals.interviewL3}</TableCell>
                   <TableCell className="text-right">{totals.totalSubs}</TableCell>
+                  <TableCell className="text-right">{monthDeal.deals || "—"}</TableCell>
+                  <TableCell className="text-right">
+                    {monthDeal.ratio === null ? "—" : `${Math.round(monthDeal.ratio)}%`}
+                  </TableCell>
                 </TableRow>
               </TableFooter>
             </Table>
