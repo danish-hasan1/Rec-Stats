@@ -289,6 +289,55 @@ export function byMonth(entries: EntryView[]): PeriodRow[] {
   return groupByPeriod(entries, monthKey, monthLabel);
 }
 
+// Trailing N month keys ending at (and including) the month containing `end`,
+// oldest first — e.g. trailingMonthKeys(6, new Date()) run in March gives
+// ["2025-10", ..., "2026-03"]. Used so a trend chart/table shows every month
+// in the window (as zeros) even ones with no entries at all, instead of
+// silently skipping gaps.
+export function trailingMonthKeys(count: number, end: Date): string[] {
+  const keys: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(end.getFullYear(), end.getMonth() - i, 1);
+    keys.push(monthKey(toISODate(d)));
+  }
+  return keys;
+}
+
+export type RecruiterMonthRow = {
+  submitterId: string;
+  submitterName: string;
+  submitterType: string;
+  monthKey: string;
+  totals: Totals;
+  rates: ConversionRates;
+  deal: DealStats;
+};
+
+// Per-submitter, per-month breakdown — the base series a performance trend
+// view is built from (byMonth alone only gives the team-wide total).
+export function recruiterMonthlyPerformance(entries: EntryView[], roles: RoleView[]): RecruiterMonthRow[] {
+  const map = new Map<string, EntryView[]>();
+  for (const e of entries) {
+    const key = `${e.submitter_id}|${monthKey(e.date)}`;
+    const list = map.get(key) ?? [];
+    list.push(e);
+    map.set(key, list);
+  }
+  return [...map.entries()].map(([key, es]) => {
+    const [submitterId, mKey] = key.split("|");
+    const totals = sumEntries(es);
+    return {
+      submitterId,
+      submitterName: es[0].submitter_name,
+      submitterType: es[0].submitter_type,
+      monthKey: mKey,
+      totals,
+      rates: conversionRates(totals),
+      deal: dealStats(es, roles, submitterId),
+    };
+  });
+}
+
 export function toISODate(d: Date) {
   // Local calendar date, not UTC — toISOString() would roll back a day
   // in timezones behind UTC for local-midnight Dates like startOfMonth/startOfWeek.

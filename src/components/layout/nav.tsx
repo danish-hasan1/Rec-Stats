@@ -11,6 +11,7 @@ import {
   CalendarRange,
   FileDown,
   Percent,
+  Lock,
 } from "lucide-react";
 
 const links = [
@@ -20,6 +21,7 @@ const links = [
   { href: "/summary", label: "Summary", icon: CalendarRange },
   { href: "/conversion", label: "Conversion", icon: Percent },
   { href: "/reports", label: "Reports", icon: FileDown },
+  { href: "/performance", label: "Performance", icon: Lock },
   { href: "/admin", label: "Admin", icon: Users },
 ];
 
