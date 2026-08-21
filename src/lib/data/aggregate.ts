@@ -49,6 +49,7 @@ export function byDate(entries: EntryView[]) {
 }
 
 export type SubmitterRow = Totals & {
+  id: string;
   name: string;
   type: string;
   // Vendor submissions credited to this recruiter's deals — kept separate
@@ -61,7 +62,7 @@ export function bySubmitter(entries: EntryView[]): SubmitterRow[] {
   const ensure = (id: string, name: string, type: string) => {
     let t = map.get(id);
     if (!t) {
-      t = { ...emptyTotals(), name, type, dealVendorSubs: 0 };
+      t = { ...emptyTotals(), id, name, type, dealVendorSubs: 0 };
       map.set(id, t);
     }
     return t;
