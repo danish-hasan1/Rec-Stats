@@ -46,6 +46,18 @@ export async function updateRoleClient(id: string, client: string | null) {
   if (error) throw error;
 }
 
+export async function deleteRole(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from("roles").delete().eq("id", id);
+  if (error) {
+    // Postgres FK violation — the role still has entries logged against it.
+    if (error.code === "23503") {
+      throw new Error("This role has entries logged against it and can't be deleted. Delete those entries first, or mark the role cancelled/lost instead.");
+    }
+    throw error;
+  }
+}
+
 export async function setSubmitterStatus(id: string, status: "active" | "inactive") {
   const supabase = createClient();
   const { error } = await supabase.from("submitters").update({ status }).eq("id", id);

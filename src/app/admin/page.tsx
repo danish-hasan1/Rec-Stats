@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/table";
 import { Combobox } from "@/components/entry/combobox";
 import {
+  deleteRole,
   fetchRoles,
   fetchSubmitters,
   setRoleStatus,
@@ -41,6 +42,7 @@ import {
 } from "@/lib/data/queries";
 import { ROLE_STATUSES, roleStatusVariant } from "@/lib/data/role-status";
 import type { RoleStatus, RoleView, Submitter, SubmitterType } from "@/types/db";
+import { Trash2 } from "lucide-react";
 
 export default function AdminPage() {
   const [submitters, setSubmitters] = useState<Submitter[]>([]);
@@ -53,6 +55,8 @@ export default function AdminPage() {
   const [editingClientValue, setEditingClientValue] = useState("");
   const [dealPickerRole, setDealPickerRole] = useState<RoleView | null>(null);
   const [dealCloserId, setDealCloserId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<RoleView | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function reload() {
     const [s, r] = await Promise.all([fetchSubmitters(), fetchRoles()]);
@@ -133,6 +137,22 @@ export default function AdminPage() {
     } catch (err) {
       toast.error("Update failed");
       console.error(err);
+    }
+  }
+
+  async function confirmDeleteRole() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteRole(deleteTarget.id);
+      toast.success(`Deleted "${deleteTarget.name}"`);
+      setDeleteTarget(null);
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+      console.error(err);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -262,6 +282,7 @@ export default function AdminPage() {
                     <TableHead>Status</TableHead>
                     <TableHead>Closed By</TableHead>
                     <TableHead className="w-44" />
+                    <TableHead className="w-12" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -321,6 +342,17 @@ export default function AdminPage() {
                           </SelectContent>
                         </Select>
                       </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDeleteTarget(r)}
+                          aria-label={`Delete ${r.name}`}
+                          title="Delete role"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -351,6 +383,27 @@ export default function AdminPage() {
           />
           <DialogFooter>
             <Button onClick={confirmDealCloser}>Confirm deal</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="glass-strong">
+          <DialogHeader>
+            <DialogTitle>Delete &ldquo;{deleteTarget?.name}&rdquo;?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This can&rsquo;t be undone. Roles with entries logged against them can&rsquo;t be
+            deleted — delete those entries first, or mark the role cancelled/lost instead if you
+            just want it out of the active list.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteRole} disabled={deleting}>
+              {deleting ? "Deleting…" : "Delete role"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
