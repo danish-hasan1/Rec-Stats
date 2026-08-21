@@ -130,6 +130,100 @@ export function byRole(entries: EntryView[]) {
   return [...map.values()].sort((a, b) => b.totalSubs - a.totalSubs);
 }
 
+export type GroupRow = {
+  id: string;
+  name: string;
+  type?: string;
+  totals: Totals;
+  entries: EntryView[];
+};
+
+function groupEntriesBy(entries: EntryView[], keyOf: (e: EntryView) => string, labelOf: (e: EntryView) => string, typeOf?: (e: EntryView) => string): GroupRow[] {
+  const map = new Map<string, EntryView[]>();
+  for (const e of entries) {
+    const key = keyOf(e);
+    const list = map.get(key) ?? [];
+    list.push(e);
+    map.set(key, list);
+  }
+  return [...map.entries()]
+    .map(([id, es]) => ({
+      id,
+      name: labelOf(es[0]),
+      type: typeOf?.(es[0]),
+      totals: sumEntries(es),
+      entries: es,
+    }))
+    .sort((a, b) => b.totals.totalSubs - a.totals.totalSubs);
+}
+
+// Like byRole, but keeps each role's raw entries around so callers can
+// derive deal stats (dealStats needs the entry list, not just totals).
+export function groupByRoleWithEntries(entries: EntryView[]): GroupRow[] {
+  return groupEntriesBy(entries, (e) => e.role_id, (e) => e.role_name);
+}
+
+// Like bySubmitter, but keeps each submitter's raw entries around for the
+// same reason, and skips the vendor-deal-credit bookkeeping bySubmitter does
+// (reports want plain per-submitter totals, not credited totals).
+export function groupBySubmitterWithEntries(entries: EntryView[]): GroupRow[] {
+  return groupEntriesBy(entries, (e) => e.submitter_id, (e) => e.submitter_name, (e) => e.submitter_type);
+}
+
+export type PeriodRow = {
+  key: string;
+  label: string;
+  totals: Totals;
+  entries: EntryView[];
+};
+
+function groupByPeriod(entries: EntryView[], keyOf: (date: string) => string, labelOf: (key: string) => string): PeriodRow[] {
+  const map = new Map<string, EntryView[]>();
+  for (const e of entries) {
+    const key = keyOf(e.date);
+    const list = map.get(key) ?? [];
+    list.push(e);
+    map.set(key, list);
+  }
+  return [...map.entries()]
+    .map(([key, es]) => ({ key, label: labelOf(key), totals: sumEntries(es), entries: es }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+export function weekKey(dateStr: string) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  const day = d.getDay();
+  const diff = (day + 6) % 7; // Monday start, matches startOfWeek()
+  d.setDate(d.getDate() - diff);
+  return toISODate(d);
+}
+
+export function weekLabel(mondayISO: string) {
+  const start = new Date(`${mondayISO}T00:00:00`);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const sameYear = start.getFullYear() === end.getFullYear();
+  return `${fmt(start)} – ${fmt(end)}${sameYear ? `, ${end.getFullYear()}` : ""}`;
+}
+
+export function monthKey(dateStr: string) {
+  return dateStr.slice(0, 7); // YYYY-MM
+}
+
+export function monthLabel(key: string) {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+export function byWeek(entries: EntryView[]): PeriodRow[] {
+  return groupByPeriod(entries, weekKey, weekLabel);
+}
+
+export function byMonth(entries: EntryView[]): PeriodRow[] {
+  return groupByPeriod(entries, monthKey, monthLabel);
+}
+
 export function toISODate(d: Date) {
   // Local calendar date, not UTC — toISOString() would roll back a day
   // in timezones behind UTC for local-midnight Dates like startOfMonth/startOfWeek.
