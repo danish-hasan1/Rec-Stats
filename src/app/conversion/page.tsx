@@ -37,7 +37,7 @@ import {
 import { downloadConversionReport, downloadConversionReportCsv } from "@/lib/data/conversion-report";
 import { roleStatusVariant } from "@/lib/data/role-status";
 import type { EntryView, RoleView, Submitter } from "@/types/db";
-import { Send, UserCheck, Percent, Layers, Download, FileSpreadsheet } from "lucide-react";
+import { Send, UserCheck, Percent, Layers, Download, FileSpreadsheet, Handshake } from "lucide-react";
 
 const ALL = "__all__";
 
@@ -62,7 +62,7 @@ function StageWiseCard({ totals, deal, title }: { totals: Totals; deal: DealStat
             <FunnelBar label="L1" value={totals.interviewL1} max={funnelMax} color="var(--chart-2)" />
             <FunnelBar label="L2" value={totals.interviewL2} max={funnelMax} color="var(--chart-3)" />
             <FunnelBar label="L3" value={totals.interviewL3} max={funnelMax} color="var(--chart-4)" />
-            <div className="grid grid-cols-2 gap-3 border-t pt-3 sm:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 border-t pt-3 sm:grid-cols-3 lg:grid-cols-6">
               <div>
                 <p className="text-xs text-muted-foreground">Subs → L1</p>
                 <p className="text-lg font-semibold">{pctLabel(rates.subToL1)}</p>
@@ -80,11 +80,13 @@ function StageWiseCard({ totals, deal, title }: { totals: Totals; deal: DealStat
                 <p className="text-lg font-semibold">{pctLabel(rates.subToL2)}</p>
               </div>
               <div>
+                <p className="text-xs text-muted-foreground">Deals closed</p>
+                <p className="text-lg font-semibold">{deal.deals}</p>
+                <p className="text-xs text-muted-foreground">of {deal.roles} roles worked</p>
+              </div>
+              <div>
                 <p className="text-xs text-muted-foreground">Deal ratio</p>
                 <p className="text-lg font-semibold">{pctLabel(deal.ratio)}</p>
-                <p className="text-xs text-muted-foreground">
-                  {deal.deals}/{deal.roles} roles
-                </p>
               </div>
             </div>
           </>
@@ -322,7 +324,7 @@ export default function ConversionPage() {
       </Card>
 
       {scopeIsFiltered && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
           <KpiCard
             label="Selection — Submissions"
             value={loading ? "…" : selectedTotals.totalSubs}
@@ -348,9 +350,15 @@ export default function ConversionPage() {
             accent="chart-4"
           />
           <KpiCard
+            label="Deals closed"
+            value={loading ? "…" : scopeDeal.deals}
+            sub={`of ${scopeDeal.roles} roles worked`}
+            icon={Handshake}
+            accent="chart-2"
+          />
+          <KpiCard
             label="Deal ratio"
             value={loading ? "…" : pctLabel(scopeDeal.ratio)}
-            sub={`${scopeDeal.deals}/${scopeDeal.roles} roles`}
             icon={Percent}
             accent="primary"
           />
