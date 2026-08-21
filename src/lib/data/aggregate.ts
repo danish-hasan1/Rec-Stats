@@ -121,6 +121,70 @@ export function dealStats(entries: EntryView[], roles: RoleView[], closedById?: 
   return { roles: total, deals, ratio: total > 0 ? (deals / total) * 100 : null };
 }
 
+// Weekly/Monthly reports call dealStats() once per period, using only that
+// period's entries. A role touched across several periods (e.g. submissions
+// logged over three different weeks) would then get credited as a fresh deal
+// in every one of them. This computes deal stats for a whole set of periods
+// at once, attributing each deal-role's credit to exactly one period — the
+// one containing its most recent entry — so the same deal is never counted
+// twice across periods.
+export function periodDealStats(periods: PeriodRow[], roles: RoleView[], closedById?: string | null): DealStats[] {
+  const rolesById = new Map(roles.map((r) => [r.id, r]));
+
+  const lastDateByRole = new Map<string, string>();
+  for (const p of periods) {
+    for (const e of p.entries) {
+      const prev = lastDateByRole.get(e.role_id);
+      if (!prev || e.date > prev) lastDateByRole.set(e.role_id, e.date);
+    }
+  }
+  const homePeriodByRole = new Map<string, string>();
+  for (const p of periods) {
+    for (const e of p.entries) {
+      if (lastDateByRole.get(e.role_id) === e.date) homePeriodByRole.set(e.role_id, p.key);
+    }
+  }
+
+  return periods.map((p) => {
+    const touchedRoleIds = new Set(p.entries.map((e) => e.role_id));
+    let deals = 0;
+    for (const roleId of touchedRoleIds) {
+      const role = rolesById.get(roleId);
+      if (!role || role.status !== "deal") continue;
+      if (closedById && role.closed_by_id !== closedById) continue;
+      if (homePeriodByRole.get(roleId) !== p.key) continue;
+      deals += 1;
+    }
+    return { roles: touchedRoleIds.size, deals, ratio: touchedRoleIds.size > 0 ? (deals / touchedRoleIds.size) * 100 : null };
+  });
+}
+
+export type UnaccountedDeal = {
+  roleId: string;
+  roleName: string;
+  closedById: string | null;
+  closedByName: string | null;
+  closedByType: string | null;
+};
+
+// A role can be marked "deal" in Admin with zero entries ever logged against
+// it (the placement was tracked purely via status, not through Daily
+// Entry). Every other report/breakdown here is built by grouping *entries*,
+// so a deal like that is invisible everywhere — it never has a row to attach
+// to. This finds those roles so callers can merge them back in explicitly.
+export function unaccountedDeals(roles: RoleView[], allEntries: EntryView[]): UnaccountedDeal[] {
+  const touchedRoleIds = new Set(allEntries.map((e) => e.role_id));
+  return roles
+    .filter((r) => r.status === "deal" && !touchedRoleIds.has(r.id))
+    .map((r) => ({
+      roleId: r.id,
+      roleName: r.name,
+      closedById: r.closed_by_id,
+      closedByName: r.closed_by_name,
+      closedByType: r.closed_by_type,
+    }));
+}
+
 export function byRole(entries: EntryView[]) {
   const map = new Map<string, Totals & { id: string; name: string }>();
   for (const e of entries) {

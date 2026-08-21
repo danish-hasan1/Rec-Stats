@@ -39,8 +39,11 @@ import {
   dealStats,
   groupByRoleWithEntries,
   groupBySubmitterWithEntries,
+  periodDealStats,
   startOfMonth,
+  sumEntries,
   toISODate,
+  unaccountedDeals,
 } from "@/lib/data/aggregate";
 import { ROLE_STATUSES, roleStatusVariant } from "@/lib/data/role-status";
 import type { EntryView, RoleView, RoleStatus, SubmitterType } from "@/types/db";
@@ -229,51 +232,102 @@ export default function ReportsPage() {
     return { totalSubs, totalInterviews, uniqueRoles, uniquePeople };
   }, [filteredEntries]);
 
+  // Deal roles with zero entries ever (e.g. a placement tracked purely via
+  // role status in Admin, never logged through Daily Entry) can't appear in
+  // any of the groupings below since those are all built from entries. Merge
+  // them back in — but only the ones still matching the current filters
+  // (role status must include "deal"; source/search still apply). They have
+  // no date of their own, so they're not filtered by the date range.
+  const unaccountedFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return unaccountedDeals(roles, entries).filter((d) => {
+      if (!statusFilter.has("deal")) return false;
+      if (sourceFilter !== "all" && d.closedByType !== sourceFilter) return false;
+      if (q && !d.roleName.toLowerCase().includes(q) && !(d.closedByName ?? "").toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [roles, entries, statusFilter, sourceFilter, search]);
+
+  const weeklyPeriods = useMemo(() => byWeek(filteredEntries), [filteredEntries]);
+  const weeklyDeals = useMemo(() => periodDealStats(weeklyPeriods, roles), [weeklyPeriods, roles]);
   const weeklyRows: SummaryReportRow[] = useMemo(
     () =>
-      byWeek(filteredEntries).map((w) => ({
+      weeklyPeriods.map((w, i) => ({
         label: w.label,
         totals: w.totals,
         rates: conversionRates(w.totals),
-        deal: dealStats(w.entries, roles),
+        deal: weeklyDeals[i],
       })),
-    [filteredEntries, roles]
+    [weeklyPeriods, weeklyDeals]
   );
 
+  const monthlyPeriods = useMemo(() => byMonth(filteredEntries), [filteredEntries]);
+  const monthlyDeals = useMemo(() => periodDealStats(monthlyPeriods, roles), [monthlyPeriods, roles]);
   const monthlyRows: SummaryReportRow[] = useMemo(
     () =>
-      byMonth(filteredEntries).map((m) => ({
+      monthlyPeriods.map((m, i) => ({
         label: m.label,
         totals: m.totals,
         rates: conversionRates(m.totals),
-        deal: dealStats(m.entries, roles),
+        deal: monthlyDeals[i],
       })),
-    [filteredEntries, roles]
+    [monthlyPeriods, monthlyDeals]
   );
 
-  const roleRows: SummaryReportRow[] = useMemo(
-    () =>
-      groupByRoleWithEntries(filteredEntries).map((g) => ({
+  const roleRows: SummaryReportRow[] = useMemo(() => {
+    const map = new Map<string, SummaryReportRow>();
+    for (const g of groupByRoleWithEntries(filteredEntries)) {
+      map.set(g.id, {
         label: g.name,
         sublabel: roleStatusById.get(g.id) ?? "open",
         totals: g.totals,
         rates: conversionRates(g.totals),
         deal: dealStats(g.entries, roles),
-      })),
-    [filteredEntries, roles, roleStatusById]
-  );
+      });
+    }
+    for (const d of unaccountedFiltered) {
+      if (map.has(d.roleId)) continue;
+      map.set(d.roleId, {
+        label: d.roleName,
+        sublabel: "deal",
+        totals: sumEntries([]),
+        rates: conversionRates(sumEntries([])),
+        deal: { roles: 1, deals: 1, ratio: 100 },
+      });
+    }
+    return [...map.values()].sort((a, b) => b.totals.totalSubs - a.totals.totalSubs);
+  }, [filteredEntries, roles, roleStatusById, unaccountedFiltered]);
 
-  const recruiterRows: SummaryReportRow[] = useMemo(
-    () =>
-      groupBySubmitterWithEntries(filteredEntries).map((g) => ({
+  const recruiterRows: SummaryReportRow[] = useMemo(() => {
+    const map = new Map<string, SummaryReportRow>();
+    for (const g of groupBySubmitterWithEntries(filteredEntries)) {
+      map.set(g.id, {
         label: g.name,
         sublabel: g.type,
         totals: g.totals,
         rates: conversionRates(g.totals),
         deal: dealStats(g.entries, roles, g.id),
-      })),
-    [filteredEntries, roles]
-  );
+      });
+    }
+    for (const d of unaccountedFiltered) {
+      if (!d.closedById) continue;
+      const existing = map.get(d.closedById);
+      if (existing) {
+        const roles2 = existing.deal.roles + 1;
+        const deals2 = existing.deal.deals + 1;
+        existing.deal = { roles: roles2, deals: deals2, ratio: (deals2 / roles2) * 100 };
+      } else {
+        map.set(d.closedById, {
+          label: d.closedByName ?? "Unknown",
+          sublabel: d.closedByType ?? "recruiter",
+          totals: sumEntries([]),
+          rates: conversionRates(sumEntries([])),
+          deal: { roles: 1, deals: 1, ratio: 100 },
+        });
+      }
+    }
+    return [...map.values()].sort((a, b) => b.totals.totalSubs - a.totals.totalSubs);
+  }, [filteredEntries, roles, unaccountedFiltered]);
 
   function toggleStatus(status: RoleStatus) {
     setStatusFilter((prev) => {
