@@ -127,6 +127,20 @@
   html {
     @apply font-sans;
   }
+
+  /* Narrow type="number" cells (the entry grid's Subs/L1/L2/L3 columns) were
+     rendering their value invisible — the native spin button plus a tight
+     width was clipping the text content box. Dropping the spin buttons
+     app-wide fixes it and frees up the space anyway; they're not useful for
+     fast row-by-row data entry. */
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
 }
 
 @layer utilities {
